@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
@@ -7,6 +7,7 @@ from app.requirement_engine import build_requirements
 from app.recommendation_engine import recommend_all
 from app.quote_engine import build_quote
 from app.catalog_engine import debug_catalog_summary
+from app.bom_engine import build_bom, build_bom_excel
 
 
 app = FastAPI(title="Network Quotation Web")
@@ -17,6 +18,10 @@ class SurveyPayload(BaseModel):
     buildings: List[Dict[str, Any]]
     server_farm: Dict[str, Any]
     wan_sites: List[Dict[str, Any]]
+
+
+class BomPayload(BaseModel):
+    quote_data: Dict[str, Any]
 
 
 def payload_to_dict(payload: SurveyPayload) -> Dict[str, Any]:
@@ -445,7 +450,7 @@ function wanCard(index, data = {{}}) {{
                 </div>
                 <div>
                     <label>Diện tích phủ sóng WiFi (m²)</label>
-                    <input type="number" id="wan_area_${{index}}" value="${{data.wifi_area || 300}}" />
+                    <input type="number" id="wan_area_${{index}}" value="${{data.wifi_area ?? 200}}" />
                 </div>
             </div>
 
@@ -553,63 +558,108 @@ function buildPayload() {{
     }};
 }}
 
-function loadSample() {{
-    document.getElementById("hq_users").value = 1000;
-    document.getElementById("hq_outdoor_wifi").checked = true;
-    document.getElementById("outdoor_area").value = 5000;
-
-    document.getElementById("sf_enabled").checked = true;
-    toggleServerFarm();
-
-    document.getElementById("sf_racks").value = 2;
-    document.getElementById("sf_servers_per_rack").value = 10;
-    document.getElementById("sf_100g").value = 0;
-    document.getElementById("sf_10g_sfp").value = 0;
-    document.getElementById("sf_10g_rj45").value = 1;
-    document.getElementById("sf_1g_sfp").value = 1;
-    document.getElementById("sf_1g_rj45").value = 2;
-
+function clearSurveyCollections() {{
     document.getElementById("buildings_container").innerHTML = "";
     document.getElementById("wan_container").innerHTML = "";
-
     buildingIndex = 0;
     wanIndex = 0;
+}}
 
-    addBuilding({{
-        name: "Tòa nhà 1",
-        floors: 6,
-        area_per_floor: 1000,
-        rooms_per_floor: 0,
-        node_per_floor: 55,
-        has_indoor_wifi: true
-    }});
+function fillSurvey(payload) {{
+    const hq = payload.hq || {{}};
+    const serverFarm = payload.server_farm || {{}};
 
-    addBuilding({{
-        name: "Tòa nhà 2",
-        floors: 6,
-        area_per_floor: 1560,
-        rooms_per_floor: 0,
-        node_per_floor: 60,
-        has_indoor_wifi: true
-    }});
+    document.getElementById("hq_users").value = hq.users ?? 1000;
+    document.getElementById("hq_outdoor_wifi").checked = hq.has_outdoor_wifi !== false;
+    document.getElementById("outdoor_area").value = hq.outdoor_area ?? 5000;
 
-    addBuilding({{
-        name: "Tòa nhà 3",
-        floors: 12,
-        area_per_floor: 800,
-        rooms_per_floor: 0,
-        node_per_floor: 65,
-        has_indoor_wifi: true
-    }});
+    document.getElementById("sf_enabled").checked = serverFarm.enabled !== false && hq.has_server_farm !== false;
+    toggleServerFarm();
 
-    addWan({{
-        name: "WAN 1",
-        users: 100,
-        bandwidth_mbps: 200,
-        node_count: 50,
-        has_wifi: true,
-        wifi_area: 300,
-        has_ha_gateway: true
+    document.getElementById("sf_racks").value = serverFarm.racks ?? 2;
+    document.getElementById("sf_servers_per_rack").value = serverFarm.servers_per_rack ?? 10;
+    document.getElementById("sf_100g").value = serverFarm.port_100g_per_server ?? 0;
+    document.getElementById("sf_10g_sfp").value = serverFarm.port_10g_sfp_per_server ?? 0;
+    document.getElementById("sf_10g_rj45").value = serverFarm.port_10g_rj45_per_server ?? 1;
+    document.getElementById("sf_1g_sfp").value = serverFarm.port_1g_sfp_per_server ?? 1;
+    document.getElementById("sf_1g_rj45").value = serverFarm.port_1g_rj45_per_server ?? 2;
+
+    clearSurveyCollections();
+
+    (payload.buildings || []).forEach(building => addBuilding(building));
+    (payload.wan_sites || []).forEach(wan => addWan(wan));
+}}
+
+function restoreSurvey() {{
+    const raw = localStorage.getItem("surveyPayload");
+
+    if (!raw) {{
+        loadSample(false);
+        return;
+    }}
+
+    try {{
+        fillSurvey(JSON.parse(raw));
+    }} catch (e) {{
+        loadSample(false);
+    }}
+}}
+
+function loadSample() {{
+    fillSurvey({{
+        hq: {{
+            users: 1000,
+            has_server_farm: true,
+            has_outdoor_wifi: true,
+            outdoor_area: 5000
+        }},
+        buildings: [
+            {{
+                name: "Tòa nhà 1",
+                floors: 6,
+                area_per_floor: 1000,
+                rooms_per_floor: 0,
+                node_per_floor: 55,
+                has_indoor_wifi: true
+            }},
+            {{
+                name: "Tòa nhà 2",
+                floors: 6,
+                area_per_floor: 1560,
+                rooms_per_floor: 0,
+                node_per_floor: 60,
+                has_indoor_wifi: true
+            }},
+            {{
+                name: "Tòa nhà 3",
+                floors: 12,
+                area_per_floor: 800,
+                rooms_per_floor: 0,
+                node_per_floor: 65,
+                has_indoor_wifi: true
+            }}
+        ],
+        server_farm: {{
+            enabled: true,
+            racks: 2,
+            servers_per_rack: 10,
+            port_100g_per_server: 0,
+            port_10g_sfp_per_server: 0,
+            port_10g_rj45_per_server: 1,
+            port_1g_sfp_per_server: 1,
+            port_1g_rj45_per_server: 2
+        }},
+        wan_sites: [
+            {{
+                name: "WAN 1",
+                users: 100,
+                bandwidth_mbps: 200,
+                node_count: 50,
+                has_wifi: true,
+                wifi_area: 200,
+                has_ha_gateway: true
+            }}
+        ]
     }});
 }}
 
@@ -653,7 +703,7 @@ async function generateCalculation() {{
     }}
 }}
 
-loadSample();
+restoreSurvey();
 </script>
 </body>
 </html>
@@ -793,6 +843,10 @@ function render() {{
                         <th>Node</th>
                         <th>WiFi</th>
                         <th>HA</th>
+                        <th>Router đã tính</th>
+                        <th>Switch đã tính</th>
+                        <th>AP indoor</th>
+                        <th>SFP 1G</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -809,6 +863,13 @@ function render() {{
                 <td>${{w.node_count}}</td>
                 <td>${{w.has_wifi ? "Y" : "N"}}</td>
                 <td>${{w.has_ha_gateway ? "Y" : "N"}}</td>
+                <td><pre>${{JSON.stringify({{
+                    router_small: w.router_small_quantity || 0,
+                    router_large: w.router_large_quantity || 0
+                }}, null, 2)}}</pre></td>
+                <td><pre>${{JSON.stringify(w.switches || {{}}, null, 2)}}</pre></td>
+                <td>${{w.ap_quantity || 0}}</td>
+                <td>${{w.sfp_1g_quantity || 0}}</td>
             </tr>
         `;
     }});
@@ -1159,6 +1220,7 @@ def quote_page():
     <div id="group_summary_block"></div>
 
     <div class="actions">
+        <a class="btn btn-primary" href="/bom">Xuất BOM</a>
         <a class="btn btn-secondary" href="/calculation-results">Quay lại kết quả tính toán</a>
         <a class="btn btn-secondary" href="/survey">Quay lại khảo sát</a>
     </div>
@@ -1249,7 +1311,34 @@ function renderAmount(line, opt) {{
     return money(line.amount && line.amount[opt] ? line.amount[opt] : 0);
 }}
 
+function getQuoteScrollState() {{
+    const tableWrap = document.querySelector("#quote_block .table-wrap");
+
+    return {{
+        tableLeft: tableWrap ? tableWrap.scrollLeft : 0,
+        tableTop: tableWrap ? tableWrap.scrollTop : 0,
+        windowX: window.scrollX,
+        windowY: window.scrollY
+    }};
+}}
+
+function restoreQuoteScrollState(state) {{
+    if (!state) return;
+
+    requestAnimationFrame(() => {{
+        const tableWrap = document.querySelector("#quote_block .table-wrap");
+
+        if (tableWrap) {{
+            tableWrap.scrollLeft = state.tableLeft || 0;
+            tableWrap.scrollTop = state.tableTop || 0;
+        }}
+
+        window.scrollTo(state.windowX || 0, state.windowY || 0);
+    }});
+}}
+
 function changeModel(index, opt, choiceIndex) {{
+    const scrollState = getQuoteScrollState();
     const line = currentQuote.quote.quote_lines[index];
     const choices = (line.options && line.options[opt]) ? line.options[opt] : [];
     const choice = choices[Number(choiceIndex)];
@@ -1260,7 +1349,7 @@ function changeModel(index, opt, choiceIndex) {{
     line.amount[opt] = Number(line.quantity || 0) * Number(choice.price || 0);
 
     localStorage.setItem("quoteData", JSON.stringify(currentQuote));
-    renderQuote();
+    renderQuote(scrollState);
 }}
 
 function renderSummary(lines) {{
@@ -1410,7 +1499,7 @@ function renderQuoteTable(lines) {{
     `;
 }}
 
-function renderQuote() {{
+function renderQuote(scrollState = null) {{
     const raw = localStorage.getItem("quoteData");
 
     if (!raw) {{
@@ -1438,6 +1527,7 @@ function renderQuote() {{
     renderSummary(lines);
     renderQuoteTable(lines);
     renderGroupSummary(lines);
+    restoreQuoteScrollState(scrollState);
 }}
 
 renderQuote();
@@ -1445,6 +1535,319 @@ renderQuote();
 </body>
 </html>
     """
+
+
+@app.get("/bom", response_class=HTMLResponse)
+def bom_page():
+    return f"""
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <title>BOM</title>
+    {BASE_STYLE}
+    <style>
+        .bom-summary {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }}
+
+        .stepbar {{
+            grid-template-columns: repeat(4, 1fr);
+        }}
+
+        .bom-metric {{
+            background: #f8fafc;
+            border: 1px solid #dbe3ef;
+            border-radius: 12px;
+            padding: 14px;
+        }}
+
+        .bom-metric .label {{
+            color: #64748b;
+            font-size: 14px;
+        }}
+
+        .bom-metric .value {{
+            margin-top: 8px;
+            font-size: 26px;
+            font-weight: 800;
+        }}
+
+        .bom-tabs {{
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }}
+
+        .bom-tab {{
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #0f172a;
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+        }}
+
+        .bom-tab.active {{
+            background: #1d4ed8;
+            border-color: #1d4ed8;
+            color: #fff;
+        }}
+
+        .bom-table-wrap {{
+            width: 100%;
+            overflow: auto;
+            border-top: 1px solid #dbe3ef;
+        }}
+
+        .bom-table {{
+            min-width: 2200px;
+            border-collapse: collapse;
+            width: 100%;
+        }}
+
+        .bom-table th,
+        .bom-table td {{
+            border: 1px solid #dbe3ef;
+            padding: 10px 12px;
+            vertical-align: top;
+            background: #fff;
+            font-size: 14px;
+        }}
+
+        .bom-table th {{
+            background: #eef5ff;
+            font-weight: 800;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }}
+
+        .num {{
+            text-align: right;
+            white-space: nowrap;
+        }}
+
+        .part {{
+            font-weight: 700;
+            white-space: nowrap;
+        }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Xuất BOM</h1>
+    <div class="subtitle">Trang 4: Gom các thiết bị đã chọn thành BOM riêng cho từng option.</div>
+
+    <div class="stepbar">
+        <div class="step">1. Nhập khảo sát</div>
+        <div class="step">2. Kết quả tính toán</div>
+        <div class="step">3. Chọn model & báo giá</div>
+        <div class="step active">4. Xuất BOM</div>
+    </div>
+
+    <div class="actions">
+        <button class="btn btn-primary" type="button" onclick="downloadBom()">Download Excel</button>
+        <a class="btn btn-secondary" href="/quote">Quay lại chọn model</a>
+        <a class="btn btn-secondary" href="/survey">Quay lại khảo sát</a>
+    </div>
+
+    <div id="bom_block"></div>
+</div>
+
+<script>
+let currentBom = null;
+let activeOption = "opt1";
+
+function money(v) {{
+    return "$" + Number(v || 0).toLocaleString(undefined, {{
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }});
+}}
+
+function esc(value) {{
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+}}
+
+async function loadBom() {{
+    const raw = localStorage.getItem("quoteData");
+
+    if (!raw) {{
+        document.getElementById("bom_block").innerHTML = `
+            <div class="card">
+                <div class="empty-state">Chưa có dữ liệu báo giá để xuất BOM.</div>
+            </div>
+        `;
+        return;
+    }}
+
+    const res = await fetch("/api/build-bom", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ quote_data: JSON.parse(raw) }})
+    }});
+
+    if (!res.ok) {{
+        const text = await res.text();
+        document.getElementById("bom_block").innerHTML = `
+            <div class="card">
+                <div class="error-box" style="display:block;">Không tạo được BOM: ${{esc(text)}}</div>
+            </div>
+        `;
+        return;
+    }}
+
+    currentBom = await res.json();
+    renderBom();
+}}
+
+function setOption(optionKey) {{
+    activeOption = optionKey;
+    renderBom();
+}}
+
+function renderSummary() {{
+    const summary = currentBom.summary || {{}};
+
+    return `
+        <div class="bom-summary">
+            ${{["opt1", "opt2", "opt3"].map(opt => `
+                <div class="bom-metric">
+                    <div class="label">${{esc(summary[opt]?.label || opt)}}</div>
+                    <div class="value">${{money(summary[opt]?.total || 0)}}</div>
+                    <div class="muted">${{summary[opt]?.line_count || 0}} dòng BOM</div>
+                </div>
+            `).join("")}}
+        </div>
+    `;
+}}
+
+function renderRows(rows) {{
+    if (!rows.length) {{
+        return `<div class="empty-state">Option này chưa có dòng BOM.</div>`;
+    }}
+
+    return `
+        <div class="bom-table-wrap">
+            <table class="bom-table">
+                <thead>
+                    <tr>
+                        <th>Group</th>
+                        <th>Hạng mục</th>
+                        <th>Model đã chọn</th>
+                        <th>Sheet</th>
+                        <th>Line</th>
+                        <th>Part Number</th>
+                        <th>Description</th>
+                        <th>Smart Account</th>
+                        <th>Included</th>
+                        <th>Qty/unit</th>
+                        <th>Quote qty</th>
+                        <th>Total qty</th>
+                        <th>List Price</th>
+                        <th>Extended List</th>
+                        <th>Discount %</th>
+                        <th>Selling Price</th>
+                        <th>Subtotal</th>
+                        <th>Service Type</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${{rows.map(row => `
+                        <tr>
+                            <td>${{esc(row.group)}}</td>
+                            <td>${{esc(row.item_type)}}</td>
+                            <td>${{esc(row.selected_model)}}</td>
+                            <td>${{esc(row.source_sheet)}}</td>
+                            <td>${{esc(row.line_number)}}</td>
+                            <td class="part">${{esc(row.part_number)}}</td>
+                            <td>${{esc(row.description)}}</td>
+                            <td>${{esc(row.smart_account_mandatory)}}</td>
+                            <td>${{esc(row.included_item)}}</td>
+                            <td class="num">${{Number(row.quantity_per_unit || 0).toLocaleString()}}</td>
+                            <td class="num">${{Number(row.quote_quantity || 0).toLocaleString()}}</td>
+                            <td class="num">${{Number(row.total_quantity || 0).toLocaleString()}}</td>
+                            <td class="num">${{money(row.list_price)}}</td>
+                            <td class="num">${{money(row.extended_list_price)}}</td>
+                            <td class="num">${{Number(row.discount_percent || 0).toLocaleString()}}</td>
+                            <td class="num">${{money(row.selling_price)}}</td>
+                            <td class="num"><strong>${{money(row.extended_selling_price)}}</strong></td>
+                            <td>${{esc(row.service_type)}}</td>
+                        </tr>
+                    `).join("")}}
+                </tbody>
+            </table>
+        </div>
+    `;
+}}
+
+function renderBom() {{
+    const options = currentBom.options || {{}};
+    const option = options[activeOption] || {{ rows: [], total: 0, label: activeOption }};
+
+    document.getElementById("bom_block").innerHTML = `
+        <div class="group-summary-card">
+            <h3>Tổng quan BOM</h3>
+            ${{renderSummary()}}
+        </div>
+
+        <div class="group-summary-card">
+            <div class="bom-tabs">
+                ${{["opt1", "opt2", "opt3"].map(opt => `
+                    <button class="bom-tab ${{activeOption === opt ? "active" : ""}}" type="button" onclick="setOption('${{opt}}')">
+                        ${{esc(options[opt]?.label || opt)}}
+                    </button>
+                `).join("")}}
+            </div>
+            <h3>${{esc(option.label)}} - ${{money(option.total || 0)}}</h3>
+            ${{renderRows(option.rows || [])}}
+        </div>
+    `;
+}}
+
+async function downloadBom() {{
+    const raw = localStorage.getItem("quoteData");
+
+    if (!raw) return;
+
+    const res = await fetch("/api/download-bom", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ quote_data: JSON.parse(raw) }})
+    }});
+
+    if (!res.ok) {{
+        alert("Không download được BOM.");
+        return;
+    }}
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "network_bom.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}}
+
+loadBom();
+</script>
+</body>
+</html>
+    """
+
 
 @app.post("/api/requirements")
 def api_requirements(payload: SurveyPayload):
@@ -1472,6 +1875,25 @@ def api_generate_quote(payload: SurveyPayload):
         "requirements": req,
         "quote": quote
     }
+
+
+@app.post("/api/build-bom")
+def api_build_bom(payload: BomPayload):
+    return build_bom(payload.quote_data)
+
+
+@app.post("/api/download-bom")
+def api_download_bom(payload: BomPayload):
+    output = build_bom_excel(payload.quote_data)
+    headers = {
+        "Content-Disposition": 'attachment; filename="network_bom.xlsx"'
+    }
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 
 @app.get("/api/debug-catalog")

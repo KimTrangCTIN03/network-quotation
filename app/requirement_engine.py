@@ -141,6 +141,7 @@ def calculate_wan_proposal(wan_sites: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
     wan_ap_total = 0
+    wan_sfp_1g_qty = 0
     wan_details = []
 
     for index, site in enumerate(wan_sites, start=1):
@@ -161,18 +162,30 @@ def calculate_wan_proposal(wan_sites: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         if router_size == "Small":
             wan_small_router_qty += router_qty
+            router_small_qty = router_qty
+            router_large_qty = 0
         else:
             wan_large_router_qty += router_qty
-
-        wan_switches = split_access_switch(node_count, 1)
-
-        for key in wan_access_totals:
-            wan_access_totals[key] += wan_switches[key]
+            router_small_qty = 0
+            router_large_qty = router_qty
 
         ap_qty = 0
         if has_wifi:
             ap_qty = ceil_div(wifi_area, 100)
             wan_ap_total += ap_qty
+
+        # Excel WAN switch sizing uses node count + indoor AP count.
+        # Example: I56 references B21 + I60, where I60 is WAN AP quantity.
+        switch_node_count = node_count + ap_qty
+        wan_switches = split_access_switch(switch_node_count, 1)
+
+        for key in wan_access_totals:
+            wan_access_totals[key] += wan_switches[key]
+
+        # Excel per-site formula:
+        # I61=(I53<>"")*(2+SUM(I56:I59)*2*(I54+I55))
+        site_sfp_1g_qty = 2 + sum(wan_switches.values()) * 2 * router_qty
+        wan_sfp_1g_qty += site_sfp_1g_qty
 
         wan_details.append({
             "name": site_name,
@@ -181,29 +194,20 @@ def calculate_wan_proposal(wan_sites: List[Dict[str, Any]]) -> Dict[str, Any]:
             "wan_demand_mbps": site_demand,
             "router_size": router_size,
             "router_quantity": router_qty,
+            "router_small_quantity": router_small_qty,
+            "router_large_quantity": router_large_qty,
             "node_count": node_count,
+            "switch_node_count": switch_node_count,
             "switches": wan_switches,
             "has_wifi": has_wifi,
             "wifi_area": wifi_area,
             "ap_quantity": ap_qty,
+            "sfp_1g_quantity": site_sfp_1g_qty,
             "has_ha_gateway": has_ha,
         })
 
     wan_total_switch = sum(wan_access_totals.values())
     wan_total_router = wan_small_router_qty + wan_large_router_qty
-
-# Logic theo công thức Excel:
-# =(J53<>"")*(2+SUM(J56:J59)*2+(J54+J55)*2)
-#
-# Trong đó:
-# - J53<>""            : có block WAN thì mới tính
-# - 2                  : 2 SFP cố định cho WAN
-# - SUM(J56:J59)*2     : tổng WAN access switch × 2
-# - (J54+J55)*2        : tổng WAN router small/large × 2
-    if wan_details:
-        wan_sfp_1g_qty = 2 + wan_total_switch * 2 + wan_total_router * 2
-    else:
-        wan_sfp_1g_qty = 0
 
     return {
         "wan_small_router_qty": wan_small_router_qty,
