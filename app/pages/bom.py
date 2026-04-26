@@ -118,12 +118,57 @@ def render_bom_page():
             color: #0000ff;
             font-weight: 900;
         }}
+
+        .bom-loading-card {{
+            background: #fff;
+            border: 1px solid #dbe3ef;
+            border-radius: 16px;
+            padding: 28px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            color: #0f172a;
+            font-weight: 700;
+        }}
+
+        .bom-spinner {{
+            width: 24px;
+            height: 24px;
+            border: 3px solid #dbeafe;
+            border-top-color: #1d4ed8;
+            border-radius: 999px;
+            animation: bomSpin 0.8s linear infinite;
+            flex: 0 0 auto;
+        }}
+
+        .bom-loading-text {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }}
+
+        .bom-loading-text span {{
+            color: #64748b;
+            font-size: 13px;
+            font-weight: 500;
+        }}
+
+        @keyframes bomSpin {{
+            to {{
+                transform: rotate(360deg);
+            }}
+        }}
+
+        .btn:disabled {{
+            opacity: 0.65;
+            cursor: not-allowed;
+        }}
     </style>
 </head>
 <body>
 <div class="container">
     <h1>Xuất BOM</h1>
-
 
     <div class="stepbar">
         <a class="step" href="/survey">1. Nhập khảo sát</a>
@@ -154,6 +199,18 @@ function esc(value) {{
         .replaceAll('"', "&quot;");
 }}
 
+function showBomLoading(message, subMessage) {{
+    document.getElementById("bom_block").innerHTML = `
+        <div class="bom-loading-card">
+            <div class="bom-spinner"></div>
+            <div class="bom-loading-text">
+                <div>${{esc(message || "Đang xuất BOM, vui lòng đợi...")}}</div>
+                <span>${{esc(subMessage || "Hệ thống đang tổng hợp dữ liệu BOM.")}}</span>
+            </div>
+        </div>
+    `;
+}}
+
 async function loadBom() {{
     const raw = localStorage.getItem("quoteData");
 
@@ -166,24 +223,34 @@ async function loadBom() {{
         return;
     }}
 
-    const res = await fetch("/api/build-bom", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ quote_data: JSON.parse(raw) }})
-    }});
+    showBomLoading("Đang xuất BOM, vui lòng đợi...", "Hệ thống đang tạo bảng BOM từ dữ liệu báo giá.");
 
-    if (!res.ok) {{
-        const text = await res.text();
+    try {{
+        const res = await fetch("/api/build-bom", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ quote_data: JSON.parse(raw) }})
+        }});
+
+        if (!res.ok) {{
+            const text = await res.text();
+            document.getElementById("bom_block").innerHTML = `
+                <div class="card">
+                    <div class="error-box" style="display:block;">Không tạo được BOM: ${{esc(text)}}</div>
+                </div>
+            `;
+            return;
+        }}
+
+        currentBom = await res.json();
+        renderBom();
+    }} catch (error) {{
         document.getElementById("bom_block").innerHTML = `
             <div class="card">
-                <div class="error-box" style="display:block;">Không tạo được BOM: ${{esc(text)}}</div>
+                <div class="error-box" style="display:block;">Không tạo được BOM. Vui lòng thử lại.</div>
             </div>
         `;
-        return;
     }}
-
-    currentBom = await res.json();
-    renderBom();
 }}
 
 function setOption(optionKey) {{
@@ -200,7 +267,6 @@ function renderSummary() {{
                 <div class="bom-metric">
                     <div class="label">${{esc(summary[opt]?.label || opt)}}</div>
                     <div class="value">${{money(summary[opt]?.total || 0)}}</div>
-                    
                 </div>
             `).join("")}}
         </div>
@@ -303,7 +369,7 @@ function renderBom() {{
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
                 <h3>${{esc(option.label)}} - ${{money(option.total || 0)}}</h3>
-                <button class="btn btn-primary" type="button" onclick="downloadBom()">Download BOM</button>
+                <button id="downloadBomBtn" class="btn btn-primary" type="button" onclick="downloadBom()">Download BOM</button>
             </div>
             ${{renderRows(option.rows || [])}}
         </div>
@@ -313,29 +379,44 @@ function renderBom() {{
 async function downloadBom() {{
     const raw = localStorage.getItem("quoteData");
     const optionKey = activeOption;
+    const btn = document.getElementById("downloadBomBtn");
 
     if (!raw) return;
 
-    const res = await fetch("/api/download-bom", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ quote_data: JSON.parse(raw), option_key: optionKey }})
-    }});
-
-    if (!res.ok) {{
-        alert("Không download được BOM.");
-        return;
+    if (btn) {{
+        btn.disabled = true;
+        btn.innerText = "Đang xuất BOM...";
     }}
 
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `network_bom_${{optionKey || "all"}}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    try {{
+        const res = await fetch("/api/download-bom", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ quote_data: JSON.parse(raw), option_key: optionKey }})
+        }});
+
+        if (!res.ok) {{
+            alert("Không download được BOM.");
+            return;
+        }}
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `network_bom_${{optionKey || "all"}}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }} catch (error) {{
+        alert("Không download được BOM. Vui lòng thử lại.");
+    }} finally {{
+        if (btn) {{
+            btn.disabled = false;
+            btn.innerText = "Download BOM";
+        }}
+    }}
 }}
 
 loadBom();
