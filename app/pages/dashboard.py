@@ -134,7 +134,7 @@ def render_dashboard_page():
         <div class="module-card">
             <div class="module-kicker"></div>
             <h2>Tính toán giải pháp</h2>
-            <p>Nhập thông tin khảo sát campus, server farm và WAN để hệ thống tính demand, số lượng thiết bị, requirement kỹ thuật, sau đó đề xuất option Low / Mid / High.</p>
+            
             <div class="module-actions">
                 <a class="btn btn-primary" href="/survey">Bắt đầu</a>
             </div>
@@ -143,7 +143,7 @@ def render_dashboard_page():
         <div class="module-card">
             <div class="module-kicker"></div>
             <h2>Báo giá & cập nhật giá</h2>
-            <p>AM upload file BOM để hệ thống lấy giá theo logic catalog hiện có. Nếu BOM có cột giá AM, hệ thống có thể lưu thành giá override cho các lần báo giá sau.</p>
+            
             <div class="module-actions">
                 <a class="btn btn-primary" href="/pricing">Bắt đầu</a>
             </div>
