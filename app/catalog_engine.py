@@ -1,5 +1,6 @@
-from pathlib import Path
 from functools import lru_cache
+import json
+from pathlib import Path
 from typing import Any, Dict, List
 import re
 
@@ -10,6 +11,8 @@ DATA_DIR = Path("data")
 
 SPECS_FILE = DATA_DIR / "Devices Specs_240426.xlsx"
 PRICE_FILE = DATA_DIR / "Cisco Unit List Price_240426.xlsx"
+PRICE_OVERRIDE_FILE = DATA_DIR / "am_price_overrides.json"
+BOM_DIR = DATA_DIR / "BOM"
 
 
 SOURCE_BOM_SHEETS = [
@@ -24,6 +27,69 @@ SOURCE_BOM_SHEETS = [
     "SFP",
     "AP",
 ]
+
+SOURCE_BOM_FILES = [
+    "C8000.xlsx",
+    "C9200.xlsx",
+    "C9300.xlsx",
+    "C1300.xlsx",
+    "C9500.xlsx",
+    "ACI.xlsx",
+    "ISR1000.xlsx",
+    "C8000_secure.xlsx",
+    "SFP.xlsx",
+    "AP.xlsx",
+]
+
+C8000_SECURE_VARIANTS = {
+    # C8000 Secure pricing is not a plain part-number lookup.
+    # Each base chassis belongs to a size group, and only some commercial
+    # variants are valid for that chassis. The tuple is:
+    #   (<license size group>, [visible quote variants])
+    # The visible model key becomes "<base model> (<variant>)".
+    "C8355-G2": ("large", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8375-E-G2": ("large", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8550-G2": ("xlarge", ["Default Routing", "Adv Routing", "SDWAN"]),
+    "C8570-G2": ("xlarge", ["Default Routing", "Adv Routing", "SDWAN"]),
+    "C8455-G2": ("xlarge", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8475-G2": ("xlarge", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8235-E-G2": ("medium", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8231-E-G2": ("medium", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8235-G2": ("medium", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8231-G2": ("medium", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8130-G2": ("small", ["Default Routing", "Adv Routing"]),
+    "C8131-G2": ("small", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8140-G2": ("small", ["Default Routing", "Adv Routing"]),
+    "C8151-G2": ("small", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+    "C8161-G2": ("small", ["Default Routing", "Adv Routing", "SDWAN", "Full Adds On"]),
+}
+
+C8000_SECURE_LICENSE_PARTS = {
+    # License add-on mapping by size group and variant.
+    # Default Routing intentionally has no entry, so its final price is exactly
+    # the base chassis subtotal. Other variants add the license part subtotals
+    # found in C8000_secure.xlsx, never hardcoded numeric prices.
+    "large": {
+        "Adv Routing": ["LIC-ROS-L-A"],
+        "SDWAN": ["LIC-CSWAN-L-A"],
+        "Full Adds On": ["LIC-CSWAN-L-A", "LIC-SEC-L-T", "LIC-SEC-L-C", "LIC-SEC-L-M"],
+    },
+    "xlarge": {
+        "Adv Routing": ["LIC-ROS-XL-A"],
+        "SDWAN": ["LIC-CSWAN-XL-A"],
+        "Full Adds On": ["LIC-CSWAN-XL-A", "LIC-SEC-XL-T", "LIC-SEC-XL-M", "LIC-SEC-XL-C"],
+    },
+    "medium": {
+        "Adv Routing": ["LIC-ROS-M-A"],
+        "SDWAN": ["LIC-CSWAN-M-A"],
+        "Full Adds On": ["LIC-CSWAN-M-A", "LIC-SEC-M-T", "LIC-SEC-M-M", "LIC-SEC-M-C"],
+    },
+    "small": {
+        "Adv Routing": ["LIC-ROS-S-A"],
+        "SDWAN": ["LIC-CSWAN-S-A"],
+        "Full Adds On": ["LIC-CSWAN-S-A", "LIC-SEC-S-T", "LIC-SEC-S-M", "LIC-SEC-S-C"],
+    },
+}
 
 
 def normalize_model(value: Any) -> str:
@@ -152,13 +218,58 @@ def sheet_exists(file_path: Path, sheet_name: str) -> bool:
     return sheet_name in wb.sheetnames
 
 
+def read_price_overrides() -> Dict[str, float]:
+    if not PRICE_OVERRIDE_FILE.exists():
+        return {}
+
+    try:
+        raw = json.loads(PRICE_OVERRIDE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    result: Dict[str, float] = {}
+
+    for model, price in raw.items():
+        model_key = normalize_model(model)
+        final_price = to_float(price, 0)
+
+        if model_key and final_price > 0:
+            result[model_key] = final_price
+
+    return result
+
+
+def save_price_overrides(prices: Dict[str, float]) -> None:
+    DATA_DIR.mkdir(exist_ok=True)
+    normalized = {
+        normalize_model(model): to_float(price, 0)
+        for model, price in prices.items()
+        if normalize_model(model) and to_float(price, 0) > 0
+    }
+    PRICE_OVERRIDE_FILE.write_text(
+        json.dumps(normalized, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    clear_catalog_cache()
+
+
+def clear_catalog_cache() -> None:
+    read_price_map.cache_clear()
+    load_catalogs.cache_clear()
+
+
 @lru_cache(maxsize=1)
 def read_price_map() -> Dict[str, float]:
+    from app.pricing.catalog import read_final_price_map
+
+    return read_final_price_map()
+
+
+def read_cisco_tab_price_map() -> Dict[str, float]:
     if not PRICE_FILE.exists():
         return {}
 
     wb = openpyxl.load_workbook(PRICE_FILE, data_only=False)
-
     price_map: Dict[str, float] = {}
 
     if "Cisco" in wb.sheetnames:
@@ -189,6 +300,126 @@ def read_price_map() -> Dict[str, float]:
     return price_map
 
 
+def read_price_map_from_bom_files() -> Dict[str, float]:
+    result: Dict[str, float] = {}
+
+    if not BOM_DIR.exists():
+        return result
+
+    for file_name in SOURCE_BOM_FILES:
+        file_path = BOM_DIR / file_name
+
+        if not file_path.exists():
+            continue
+
+        wb = openpyxl.load_workbook(file_path, data_only=False)
+        ws = wb.active
+
+        if file_name == "C8000_secure.xlsx":
+            read_c8000_secure_variant_prices(wb, ws, result)
+        else:
+            read_subtotal_bundle_prices(wb, ws, result)
+
+    return result
+
+
+def read_c8000_secure_variant_prices(wb, ws, result: Dict[str, float]) -> None:
+    """Build C8000 Secure final prices from base chassis + license mapping.
+
+    The Excel source has two kinds of rows that matter:
+    1. Chassis blocks with a normal subtotal. These become base_prices.
+    2. License part rows such as LIC-ROS-*, LIC-CSWAN-*, LIC-SEC-*.
+
+    C8000_SECURE_VARIANTS decides which visible quote variants exist per base
+    model. C8000_SECURE_LICENSE_PARTS decides which license part numbers are
+    added for each variant. This mirrors the Excel formula/mapping behavior
+    without importing final prices from "Cisco Unit List Price".
+    """
+    base_prices: Dict[str, float] = {}
+    part_prices: Dict[str, float] = {}
+    row = 2
+
+    # First pass: collect every priced part row so license add-ons can be
+    # referenced by part number later. Missing license part prices resolve to 0,
+    # which keeps the function deterministic while making source data gaps easy
+    # to spot through price comparison/debug output.
+    for part_row in range(2, ws.max_row + 1):
+        part_number = normalize_model(cell_value(wb, ws, part_row, 2))
+        price = to_float(cell_value(wb, ws, part_row, 14), 0)
+
+        if part_number and price > 0:
+            part_prices[part_number] = price
+
+    # Second pass: collect the base chassis subtotal for each C8000 Secure
+    # model. The loop stops at the block subtotal or at the next numbered model
+    # row, matching how the BOM groups rows visually.
+    while row <= ws.max_row:
+        model = normalize_model(cell_value(wb, ws, row, 2))
+
+        if not is_integer_line_number(cell_value(wb, ws, row, 1)) or model not in C8000_SECURE_VARIANTS:
+            row += 1
+            continue
+
+        subtotal = 0.0
+
+        for scan_row in range(row + 1, ws.max_row + 1):
+            next_line_number = cell_value(wb, ws, scan_row, 1)
+            next_model = normalize_model(cell_value(wb, ws, scan_row, 2))
+            subtotal_label = str(cell_value(wb, ws, scan_row, 13) or "").strip().lower()
+
+            if subtotal_label == "subtotal":
+                subtotal = to_float(cell_value(wb, ws, scan_row, 14), 0)
+                row = scan_row
+                break
+
+            if is_integer_line_number(next_line_number) and next_model:
+                break
+
+        if subtotal > 0 and model not in base_prices:
+            base_prices[model] = subtotal
+
+        row += 1
+
+    for model, base_price in base_prices.items():
+        size, variants = C8000_SECURE_VARIANTS[model]
+        license_parts = C8000_SECURE_LICENSE_PARTS[size]
+
+        for variant in variants:
+            # Final variant price:
+            #   base chassis subtotal
+            #   + sum(price of mapped license parts for this size/variant)
+            # Default Routing has no mapped license parts, so sum(...) is 0.
+            result[f"{model} ({variant})"] = base_price + sum(
+                part_prices.get(normalize_model(part_number), 0)
+                for part_number in license_parts.get(variant, [])
+            )
+
+
+def read_subtotal_bundle_prices(wb, ws, result: Dict[str, float]) -> None:
+    base_models = []
+    subtotals = []
+
+    for row in range(2, ws.max_row + 1):
+        line_number = cell_value(wb, ws, row, 1)
+        item_name = cell_value(wb, ws, row, 2)
+
+        if is_integer_line_number(line_number) and item_name:
+            base_models.append(normalize_model(item_name))
+
+        label_m = cell_value(wb, ws, row, 13)
+        subtotal_n = cell_value(wb, ws, row, 14)
+
+        if str(label_m or "").strip().lower() == "subtotal":
+            price = to_float(subtotal_n, 0)
+
+            if price > 0:
+                subtotals.append(price)
+
+    for model, price in zip(base_models, subtotals):
+        if model and price > 0:
+            result[model] = price
+
+
 def read_price_map_from_bom_tabs(wb) -> Dict[str, float]:
     result: Dict[str, float] = {}
 
@@ -199,29 +430,7 @@ def read_price_map_from_bom_tabs(wb) -> Dict[str, float]:
         ws = wb[sheet_name]
 
         read_aggregated_sheet_prices(wb, ws, result)
-
-        base_models = []
-        subtotals = []
-
-        for row in range(2, ws.max_row + 1):
-            line_number = cell_value(wb, ws, row, 1)
-            item_name = cell_value(wb, ws, row, 2)
-
-            if is_integer_line_number(line_number) and item_name:
-                base_models.append(normalize_model(item_name))
-
-            label_m = cell_value(wb, ws, row, 13)
-            subtotal_n = cell_value(wb, ws, row, 14)
-
-            if str(label_m or "").strip().lower() == "subtotal":
-                price = to_float(subtotal_n, 0)
-
-                if price > 0:
-                    subtotals.append(price)
-
-        for model, price in zip(base_models, subtotals):
-            if model and price > 0:
-                result[model] = price
+        read_subtotal_bundle_prices(wb, ws, result)
 
     return result
 
@@ -552,3 +761,66 @@ def debug_catalog_summary() -> Dict[str, Any]:
         "sfp_count": len(catalogs["sfps"]),
         "sample_prices": list(catalogs["prices"].items())[:10],
     }
+
+
+def compare_price_map_with_cisco_tab(limit: int = 50) -> Dict[str, Any]:
+    from app.pricing.catalog import read_list_price_map
+
+    current = read_list_price_map()
+    cisco = read_cisco_tab_list_price_map()
+    mismatches = []
+    missing_in_current = []
+    missing_in_cisco = []
+
+    for model, cisco_price in cisco.items():
+        current_price = current.get(model)
+
+        if current_price is None:
+            missing_in_current.append({"model": model, "cisco_price": cisco_price})
+            continue
+
+        if round(float(current_price), 2) != round(float(cisco_price), 2):
+            mismatches.append({
+                "model": model,
+                "current_price": current_price,
+                "cisco_price": cisco_price,
+                "delta": current_price - cisco_price,
+            })
+
+    for model, current_price in current.items():
+        if model not in cisco:
+            missing_in_cisco.append({"model": model, "current_price": current_price})
+
+    return {
+        "current_count": len(current),
+        "cisco_count": len(cisco),
+        "matched_count": len(cisco) - len(missing_in_current) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_current_count": len(missing_in_current),
+        "missing_in_cisco_count": len(missing_in_cisco),
+        "mismatches": mismatches[:limit],
+        "missing_in_current": missing_in_current[:limit],
+        "missing_in_cisco": missing_in_cisco[:limit],
+    }
+
+
+def read_cisco_tab_list_price_map() -> Dict[str, float]:
+    if not PRICE_FILE.exists():
+        return {}
+
+    wb = openpyxl.load_workbook(PRICE_FILE, data_only=False)
+    result: Dict[str, float] = {}
+
+    if "Cisco" not in wb.sheetnames:
+        return result
+
+    ws = wb["Cisco"]
+
+    for row in range(2, ws.max_row + 1):
+        model = normalize_model(cell_value(wb, ws, row, 1))
+        price = to_float(cell_value(wb, ws, row, 2), 0)
+
+        if model and price > 0:
+            result[model] = price
+
+    return result

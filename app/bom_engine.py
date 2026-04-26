@@ -6,7 +6,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from app.catalog_engine import PRICE_FILE, cell_value, is_integer_line_number, normalize_model, to_float
+from app.catalog_engine import BOM_DIR, cell_value, is_integer_line_number, normalize_model, to_float
 
 
 OPTIONS = [
@@ -26,6 +26,19 @@ DETAIL_BOM_SHEETS = [
     "AP_input",
     "ISR1000_input",
     "C8000_secure_input",
+]
+
+DETAIL_BOM_FILES = [
+    "C8000.xlsx",
+    "C9200.xlsx",
+    "C9300.xlsx",
+    "C1300.xlsx",
+    "C9500.xlsx",
+    "ACI.xlsx",
+    "SFP.xlsx",
+    "AP.xlsx",
+    "ISR1000.xlsx",
+    "C8000_secure.xlsx",
 ]
 
 BOM_COLUMNS = [
@@ -113,7 +126,7 @@ def row_to_bom_part(
 
 
 def find_bundle_parts(
-    wb,
+    workbooks: List[Any],
     selected_model: str,
     quote_quantity: float,
     option_key: str,
@@ -121,70 +134,86 @@ def find_bundle_parts(
 ) -> List[Dict[str, Any]]:
     candidates = set(normalized_candidates(selected_model))
 
-    for sheet_name in DETAIL_BOM_SHEETS:
-        if sheet_name not in wb.sheetnames:
-            continue
-
-        ws = wb[sheet_name]
-
-        for row in range(2, ws.max_row + 1):
-            line_number = cell_value(wb, ws, row, 1)
-            part_number = cell_value(wb, ws, row, 2)
-
-            if not is_integer_line_number(line_number):
+    for wb in workbooks:
+        for sheet_name in DETAIL_BOM_SHEETS:
+            if sheet_name not in wb.sheetnames:
                 continue
 
-            if normalize_model(part_number) not in candidates:
-                continue
+            ws = wb[sheet_name]
 
-            parts = []
-            stop_row = ws.max_row + 1
+            for row in range(2, ws.max_row + 1):
+                line_number = cell_value(wb, ws, row, 1)
+                part_number = cell_value(wb, ws, row, 2)
 
-            for part_row in range(row, ws.max_row + 1):
-                if part_row != row:
-                    next_line_number = cell_value(wb, ws, part_row, 1)
-                    next_part_number = cell_value(wb, ws, part_row, 2)
+                if not is_integer_line_number(line_number):
+                    continue
 
-                    if is_integer_line_number(next_line_number) and next_part_number:
-                        break
+                if normalize_model(part_number) not in candidates:
+                    continue
 
-                subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
+                parts = []
+                stop_row = ws.max_row + 1
 
-                if subtotal_label == "subtotal":
-                    stop_row = part_row
-                    break
+                for part_row in range(row, ws.max_row + 1):
+                    if part_row != row:
+                        next_line_number = cell_value(wb, ws, part_row, 1)
+                        next_part_number = cell_value(wb, ws, part_row, 2)
 
-                part = row_to_bom_part(wb, ws, part_row, selected_model, quote_quantity, option_key, line)
-
-                if part:
-                    parts.append(part)
-
-            if ws.title == "ISR1000_input":
-                marker_row = None
-                model_key = normalize_model(selected_model).lower()
-
-                for scan_row in range(stop_row + 1, min(ws.max_row, stop_row + 4) + 1):
-                    marker = str(cell_value(wb, ws, scan_row, 3) or "").lower()
-
-                    if "license" in marker and model_key in normalize_model(marker).lower():
-                        marker_row = scan_row
-                        break
-
-                if marker_row:
-                    for part_row in range(marker_row + 1, ws.max_row + 1):
-                        subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
-
-                        if subtotal_label == "subtotal":
+                        if is_integer_line_number(next_line_number) and next_part_number:
                             break
 
-                        part = row_to_bom_part(wb, ws, part_row, selected_model, quote_quantity, option_key, line)
+                    subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
 
-                        if part:
-                            parts.append(part)
+                    if subtotal_label == "subtotal":
+                        stop_row = part_row
+                        break
 
-            return parts
+                    part = row_to_bom_part(wb, ws, part_row, selected_model, quote_quantity, option_key, line)
+
+                    if part:
+                        parts.append(part)
+
+                if ws.title == "ISR1000_input":
+                    marker_row = None
+                    model_key = normalize_model(selected_model).lower()
+
+                    for scan_row in range(stop_row + 1, min(ws.max_row, stop_row + 4) + 1):
+                        marker = str(cell_value(wb, ws, scan_row, 3) or "").lower()
+
+                        if "license" in marker and model_key in normalize_model(marker).lower():
+                            marker_row = scan_row
+                            break
+
+                    if marker_row:
+                        for part_row in range(marker_row + 1, ws.max_row + 1):
+                            subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
+
+                            if subtotal_label == "subtotal":
+                                break
+
+                            part = row_to_bom_part(wb, ws, part_row, selected_model, quote_quantity, option_key, line)
+
+                            if part:
+                                parts.append(part)
+
+                return parts
 
     return []
+
+
+def load_detail_bom_workbooks() -> List[Any]:
+    workbooks = []
+
+    if not BOM_DIR.exists():
+        return workbooks
+
+    for file_name in DETAIL_BOM_FILES:
+        file_path = BOM_DIR / file_name
+
+        if file_path.exists():
+            workbooks.append(openpyxl.load_workbook(file_path, data_only=False))
+
+    return workbooks
 
 
 def fallback_selected_device_row(
@@ -205,7 +234,7 @@ def fallback_selected_device_row(
         "line_number": "",
         "part_number": model,
         "smart_account_mandatory": "",
-        "description": "No detailed BOM found in Cisco Unit List Price",
+        "description": "No detailed BOM found in imported BOM files",
         "group_name": "",
         "service_duration_months": "",
         "estimated_lead_time_days": "",
@@ -262,7 +291,7 @@ def aggregate_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
     quote = quote_data.get("quote", quote_data)
     quote_lines = quote.get("quote_lines", [])
-    wb = openpyxl.load_workbook(PRICE_FILE, data_only=False)
+    workbooks = load_detail_bom_workbooks()
     result: Dict[str, Any] = {"options": {}, "summary": {}}
 
     for option_key, option_label in OPTIONS:
@@ -276,7 +305,7 @@ def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
             if not model or quote_quantity <= 0:
                 continue
 
-            parts = find_bundle_parts(wb, model, quote_quantity, option_key, line)
+            parts = find_bundle_parts(workbooks, model, quote_quantity, option_key, line)
 
             if not parts:
                 parts = [fallback_selected_device_row(selected, quote_quantity, option_key, line)]
