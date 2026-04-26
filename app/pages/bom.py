@@ -100,24 +100,36 @@ def render_bom_page():
             font-weight: 700;
             white-space: nowrap;
         }}
+
+        .group-row td {{
+            background: #1d4ed8;
+            color: #fff;
+            font-weight: 900;
+            font-size: 15px;
+        }}
+
+        .subtotal-row td {{
+            background: #fff7d6;
+            font-weight: 900;
+        }}
+
+        .estimate-total-row td {{
+            background: #e0f2fe;
+            color: #0000ff;
+            font-weight: 900;
+        }}
     </style>
 </head>
 <body>
 <div class="container">
     <h1>Xuất BOM</h1>
-    <div class="subtitle">Trang 4: Gom các thiết bị đã chọn thành BOM riêng cho từng option.</div>
+
 
     <div class="stepbar">
-        <div class="step">1. Nhập khảo sát</div>
-        <div class="step">2. Kết quả tính toán</div>
-        <div class="step">3. Chọn model & báo giá</div>
-        <div class="step active">4. Xuất BOM</div>
-    </div>
-
-    <div class="actions">
-        <button class="btn btn-primary" type="button" onclick="downloadBom()">Download Excel</button>
-        <a class="btn btn-secondary" href="/quote">Quay lại chọn model</a>
-        <a class="btn btn-secondary" href="/survey">Quay lại khảo sát</a>
+        <a class="step" href="/survey">1. Nhập khảo sát</a>
+        <a class="step" href="/calculation-results">2. Kết quả tính toán</a>
+        <a class="step" href="/quote">3. Chọn model & báo giá</a>
+        <a class="step active" href="/bom">4. Xuất BOM</a>
     </div>
 
     <div id="bom_block"></div>
@@ -188,7 +200,7 @@ function renderSummary() {{
                 <div class="bom-metric">
                     <div class="label">${{esc(summary[opt]?.label || opt)}}</div>
                     <div class="value">${{money(summary[opt]?.total || 0)}}</div>
-                    <div class="muted">${{summary[opt]?.line_count || 0}} dòng BOM</div>
+                    
                 </div>
             `).join("")}}
         </div>
@@ -197,7 +209,7 @@ function renderSummary() {{
 
 function renderRows(rows) {{
     if (!rows.length) {{
-        return `<div class="empty-state">Option này chưa có dòng BOM.</div>`;
+        return `<div class="empty-state">Option này chưa có BOM.</div>`;
     }}
 
     return `
@@ -205,48 +217,65 @@ function renderRows(rows) {{
             <table class="bom-table">
                 <thead>
                     <tr>
-                        <th>Group</th>
-                        <th>Hạng mục</th>
-                        <th>Model đã chọn</th>
-                        <th>Sheet</th>
-                        <th>Line</th>
-                        <th>Part Number</th>
+                        <th>Line Number</th>
+                        <th>Item Name</th>
+                        <th>Smart Account Mandatory</th>
                         <th>Description</th>
-                        <th>Smart Account</th>
-                        <th>Included</th>
-                        <th>Qty/unit</th>
-                        <th>Quote qty</th>
-                        <th>Total qty</th>
-                        <th>List Price</th>
-                        <th>Extended List</th>
+                        <th>Group Name</th>
+                        <th>Service Duration (Months)</th>
+                        <th>Estimated Lead Time (Days)</th>
+                        <th>Included Item</th>
+                        <th>Quantity</th>
+                        <th>Pricing Term</th>
+                        <th>ListPrice</th>
+                        <th>Extended ListPrice</th>
                         <th>Discount %</th>
                         <th>Selling Price</th>
-                        <th>Subtotal</th>
                         <th>Service Type</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${{rows.map(row => `
+                        ${{row.is_group_header ? `
+                            <tr class="group-row">
+                                <td colspan="15">${{esc(row.group || row.description)}}</td>
+                            </tr>
+                        ` : row.is_subtotal ? `
+                            <tr class="subtotal-row">
+                                <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+                                <td></td><td></td><td></td>
+                                <td class="num">${{money(row.extended_list_price)}}</td>
+                                <td>SubTotal</td>
+                                <td class="num">${{money(row.extended_selling_price)}}</td>
+                                <td></td>
+                            </tr>
+                        ` : row.is_estimate_total ? `
+                            <tr class="estimate-total-row">
+                                <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+                                <td></td><td></td><td></td><td></td>
+                                <td>Estimate Total</td>
+                                <td class="num">${{money(row.extended_selling_price)}}</td>
+                                <td></td>
+                            </tr>
+                        ` : `
                         <tr>
-                            <td>${{esc(row.group)}}</td>
-                            <td>${{esc(row.item_type)}}</td>
-                            <td>${{esc(row.selected_model)}}</td>
-                            <td>${{esc(row.source_sheet)}}</td>
                             <td>${{esc(row.line_number)}}</td>
                             <td class="part">${{esc(row.part_number)}}</td>
-                            <td>${{esc(row.description)}}</td>
                             <td>${{esc(row.smart_account_mandatory)}}</td>
+                            <td>${{esc(row.description)}}</td>
+                            <td>${{esc(row.group_name)}}</td>
+                            <td>${{esc(row.service_duration_months)}}</td>
+                            <td>${{esc(row.estimated_lead_time_days)}}</td>
                             <td>${{esc(row.included_item)}}</td>
-                            <td class="num">${{Number(row.quantity_per_unit || 0).toLocaleString()}}</td>
-                            <td class="num">${{Number(row.quote_quantity || 0).toLocaleString()}}</td>
                             <td class="num">${{Number(row.total_quantity || 0).toLocaleString()}}</td>
+                            <td>${{esc(row.pricing_term)}}</td>
                             <td class="num">${{money(row.list_price)}}</td>
                             <td class="num">${{money(row.extended_list_price)}}</td>
                             <td class="num">${{Number(row.discount_percent || 0).toLocaleString()}}</td>
-                            <td class="num">${{money(row.selling_price)}}</td>
                             <td class="num"><strong>${{money(row.extended_selling_price)}}</strong></td>
                             <td>${{esc(row.service_type)}}</td>
                         </tr>
+                        `}}
                     `).join("")}}
                 </tbody>
             </table>
@@ -272,7 +301,10 @@ function renderBom() {{
                     </button>
                 `).join("")}}
             </div>
-            <h3>${{esc(option.label)}} - ${{money(option.total || 0)}}</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                <h3>${{esc(option.label)}} - ${{money(option.total || 0)}}</h3>
+                <button class="btn btn-primary" type="button" onclick="downloadBom()">Download BOM</button>
+            </div>
             ${{renderRows(option.rows || [])}}
         </div>
     `;
@@ -280,13 +312,14 @@ function renderBom() {{
 
 async function downloadBom() {{
     const raw = localStorage.getItem("quoteData");
+    const optionKey = activeOption;
 
     if (!raw) return;
 
     const res = await fetch("/api/download-bom", {{
         method: "POST",
         headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ quote_data: JSON.parse(raw) }})
+        body: JSON.stringify({{ quote_data: JSON.parse(raw), option_key: optionKey }})
     }});
 
     if (!res.ok) {{
@@ -298,7 +331,7 @@ async function downloadBom() {{
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "network_bom.xlsx";
+    a.download = `network_bom_${{optionKey || "all"}}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();

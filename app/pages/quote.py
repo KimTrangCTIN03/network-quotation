@@ -289,9 +289,9 @@ def render_quote_page():
     </div>
 
     <div class="stepbar">
-        <div class="step">1. Nhập khảo sát</div>
-        <div class="step">2. Kết quả tính toán</div>
-        <div class="step active">3. Chọn model & báo giá</div>
+        <a class="step" href="/survey">1. Nhập khảo sát</a>
+        <a class="step" href="/calculation-results">2. Kết quả tính toán</a>
+        <a class="step active" href="/quote">3. Chọn model & báo giá</a>
     </div>
 
     <div id="summary_block"></div>

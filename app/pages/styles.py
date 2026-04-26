@@ -34,8 +34,22 @@ BASE_STYLE = """
         padding: 14px;
         color: #64748b;
         font-weight: bold;
+        display: block;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .step:hover {
+        background: #eff6ff;
+        border-color: #bfdbfe;
+        color: #1d4ed8;
     }
     .step.active {
+        background: #2563eb;
+        color: white;
+        border-color: #2563eb;
+    }
+    .step.active:hover {
         background: #2563eb;
         color: white;
         border-color: #2563eb;

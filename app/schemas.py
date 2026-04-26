@@ -12,6 +12,7 @@ class SurveyPayload(BaseModel):
 
 class BomPayload(BaseModel):
     quote_data: Dict[str, Any]
+    option_key: str | None = None
 
 
 class AmPricePayload(BaseModel):

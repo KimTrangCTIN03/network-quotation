@@ -93,9 +93,10 @@ def api_build_bom(payload: BomPayload):
 
 @app.post("/api/download-bom")
 def api_download_bom(payload: BomPayload):
-    output = build_bom_excel(payload.quote_data)
+    output = build_bom_excel(payload.quote_data, payload.option_key)
+    suffix = f"_{payload.option_key}" if payload.option_key else ""
     headers = {
-        "Content-Disposition": 'attachment; filename="network_bom.xlsx"'
+        "Content-Disposition": f'attachment; filename="network_bom{suffix}.xlsx"'
     }
 
     return StreamingResponse(

@@ -7,6 +7,8 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.catalog_engine import BOM_DIR, cell_value, is_integer_line_number, normalize_model, to_float
+from app.catalog_engine import C8000_SECURE_LICENSE_PARTS, C8000_SECURE_VARIANTS
+from app.pricing.rules import INDOOR_AP_POWER_INJECTOR, OUTDOOR_AP_ACCESSORIES, WIFI7_LICENSE_BUNDLE
 
 
 OPTIONS = [
@@ -41,31 +43,59 @@ DETAIL_BOM_FILES = [
     "C8000_secure.xlsx",
 ]
 
-BOM_COLUMNS = [
-    "option",
-    "group",
-    "item_type",
-    "selected_model",
-    "source_sheet",
-    "line_number",
-    "part_number",
-    "smart_account_mandatory",
-    "description",
-    "group_name",
-    "service_duration_months",
-    "estimated_lead_time_days",
-    "included_item",
-    "quantity_per_unit",
-    "quote_quantity",
-    "total_quantity",
-    "pricing_term",
-    "list_price",
-    "extended_list_price",
-    "discount_percent",
-    "selling_price",
-    "extended_selling_price",
-    "service_type",
+BOM_COLUMN_DEFINITIONS = [
+    ("line_number", "Line Number"),
+    ("part_number", "Item Name"),
+    ("smart_account_mandatory", "Smart Account Mandatory"),
+    ("description", "Description"),
+    ("group_name", "Group Name"),
+    ("service_duration_months", "Service Duration (Months)"),
+    ("estimated_lead_time_days", "Estimated Lead Time (Days)"),
+    ("included_item", "Included Item"),
+    ("total_quantity", "Quantity"),
+    ("pricing_term", "Pricing Term"),
+    ("list_price", "ListPrice"),
+    ("extended_list_price", "Extended ListPrice"),
+    ("discount_percent", "Discount %"),
+    ("extended_selling_price", "Selling Price"),
+    ("service_type", "Service Type"),
 ]
+BOM_COLUMN_KEYS = [key for key, _label in BOM_COLUMN_DEFINITIONS]
+
+
+def selected_base_model(model: str) -> str:
+    return normalize_model(str(model or "").split("(", 1)[0].strip())
+
+
+def selected_variant(model: str) -> str:
+    text = str(model or "")
+
+    if "(" not in text or ")" not in text:
+        return ""
+
+    return text.split("(", 1)[1].split(")", 1)[0].strip()
+
+
+def infer_component_type(part_number: Any, line_number: Any = "") -> str:
+    part = normalize_model(part_number).upper()
+    line_text = str(line_number or "")
+
+    if is_integer_line_number(line_number):
+        return "Base"
+
+    if part.startswith("CON-"):
+        return "Support"
+
+    if any(token in part for token in ["LIC", "DNA", "SDWAN", "SUB", "SEC", "STACK"]):
+        return "License"
+
+    if any(token in part for token in ["BRKT", "BRACKET", "MNT", "RM-"]):
+        return "Bracket/Mount"
+
+    if any(token in part for token in ["PWR", "CAB", "BLANK", "RFID", "INJ"]):
+        return "Accessory"
+
+    return "Component"
 
 
 def normalized_candidates(model: str) -> List[str]:
@@ -86,23 +116,26 @@ def row_to_bom_part(
     quote_quantity: float,
     option_key: str,
     line: Dict[str, Any],
+    component_type: str = "",
+    quantity_multiplier: float = 1,
 ) -> Dict[str, Any] | None:
     part_number = cell_value(wb, ws, row, 2)
 
     if not part_number:
         return None
 
-    quantity_per_unit = to_float(cell_value(wb, ws, row, 9), 1)
+    quantity_per_unit = to_float(cell_value(wb, ws, row, 9), 1) * quantity_multiplier
     list_price = to_float(cell_value(wb, ws, row, 11), 0)
-    extended_list_price = to_float(cell_value(wb, ws, row, 12), list_price * quantity_per_unit)
+    extended_list_price = to_float(cell_value(wb, ws, row, 12), list_price * to_float(cell_value(wb, ws, row, 9), 1)) * quantity_multiplier
     discount_percent = to_float(cell_value(wb, ws, row, 13), 0)
-    selling_price = to_float(cell_value(wb, ws, row, 14), extended_list_price)
+    selling_price = to_float(cell_value(wb, ws, row, 14), extended_list_price) * quantity_multiplier
 
     return {
         "option": option_key,
         "group": line.get("group", ""),
         "item_type": line.get("item_type", ""),
         "selected_model": selected_model,
+        "component_type": component_type or infer_component_type(part_number, cell_value(wb, ws, row, 1)),
         "source_sheet": ws.title,
         "line_number": cell_value(wb, ws, row, 1),
         "part_number": str(part_number).strip(),
@@ -125,6 +158,114 @@ def row_to_bom_part(
     }
 
 
+def find_part_block(
+    workbooks: List[Any],
+    model: str,
+    selected_model: str,
+    quote_quantity: float,
+    option_key: str,
+    line: Dict[str, Any],
+    component_type: str = "",
+    quantity_multiplier: float = 1,
+) -> List[Dict[str, Any]]:
+    candidates = set(normalized_candidates(model))
+
+    for wb in workbooks:
+        for sheet_name in DETAIL_BOM_SHEETS:
+            if sheet_name not in wb.sheetnames:
+                continue
+
+            ws = wb[sheet_name]
+
+            for row in range(2, ws.max_row + 1):
+                line_number = cell_value(wb, ws, row, 1)
+                part_number = cell_value(wb, ws, row, 2)
+
+                if not is_integer_line_number(line_number) or normalize_model(part_number) not in candidates:
+                    continue
+
+                parts = []
+
+                for part_row in range(row, ws.max_row + 1):
+                    if part_row != row:
+                        next_line_number = cell_value(wb, ws, part_row, 1)
+                        next_part_number = cell_value(wb, ws, part_row, 2)
+
+                        if is_integer_line_number(next_line_number) and next_part_number:
+                            break
+
+                    subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
+
+                    if subtotal_label == "subtotal":
+                        break
+
+                    part = row_to_bom_part(
+                        wb,
+                        ws,
+                        part_row,
+                        selected_model,
+                        quote_quantity,
+                        option_key,
+                        line,
+                        component_type,
+                        quantity_multiplier,
+                    )
+
+                    if part:
+                        parts.append(part)
+
+                return parts
+
+    return []
+
+
+def find_part_rows(
+    workbooks: List[Any],
+    model: str,
+    selected_model: str,
+    quote_quantity: float,
+    option_key: str,
+    line: Dict[str, Any],
+    component_type: str,
+    quantity_multiplier: float = 1,
+) -> List[Dict[str, Any]]:
+    candidates = set(normalized_candidates(model))
+    parts = []
+
+    for wb in workbooks:
+        for sheet_name in DETAIL_BOM_SHEETS:
+            if sheet_name not in wb.sheetnames:
+                continue
+
+            ws = wb[sheet_name]
+
+            for row in range(2, ws.max_row + 1):
+                part_number = cell_value(wb, ws, row, 2)
+
+                if normalize_model(part_number) not in candidates:
+                    continue
+
+                part = row_to_bom_part(
+                    wb,
+                    ws,
+                    row,
+                    selected_model,
+                    quote_quantity,
+                    option_key,
+                    line,
+                    component_type,
+                    quantity_multiplier,
+                )
+
+                if part:
+                    parts.append(part)
+
+        if parts:
+            return parts
+
+    return parts
+
+
 def find_bundle_parts(
     workbooks: List[Any],
     selected_model: str,
@@ -132,7 +273,8 @@ def find_bundle_parts(
     option_key: str,
     line: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    candidates = set(normalized_candidates(selected_model))
+    base_model = selected_base_model(selected_model)
+    candidates = set(normalized_candidates(base_model or selected_model))
 
     for wb in workbooks:
         for sheet_name in DETAIL_BOM_SHEETS:
@@ -196,9 +338,43 @@ def find_bundle_parts(
                             if part:
                                 parts.append(part)
 
+                parts.extend(add_mapped_components(workbooks, selected_model, quote_quantity, option_key, line, ws.title))
                 return parts
 
     return []
+
+
+def add_mapped_components(
+    workbooks: List[Any],
+    selected_model: str,
+    quote_quantity: float,
+    option_key: str,
+    line: Dict[str, Any],
+    source_sheet: str = "",
+) -> List[Dict[str, Any]]:
+    model = selected_base_model(selected_model)
+    extras: List[Dict[str, Any]] = []
+
+    if source_sheet == "AP_input":
+        if model.startswith("CW917"):
+            extras.extend(find_part_block(workbooks, INDOOR_AP_POWER_INJECTOR, selected_model, quote_quantity, option_key, line, "Accessory"))
+            extras.extend(find_part_block(workbooks, WIFI7_LICENSE_BUNDLE, selected_model, quote_quantity, option_key, line, "License", 1 / 5))
+        elif model.startswith("C9124") or model == "CW9163E":
+            for part_number in OUTDOOR_AP_ACCESSORIES:
+                component_type = "Bracket/Mount" if "MNT" in part_number else "Accessory"
+                extras.extend(find_part_block(workbooks, part_number, selected_model, quote_quantity, option_key, line, component_type))
+        elif model.startswith("C9136") or model.startswith("CW916"):
+            extras.extend(find_part_block(workbooks, INDOOR_AP_POWER_INJECTOR, selected_model, quote_quantity, option_key, line, "Accessory"))
+
+    variant = selected_variant(selected_model)
+
+    if source_sheet == "C8000_secure_input" and model in C8000_SECURE_VARIANTS and variant:
+        size, _variants = C8000_SECURE_VARIANTS[model]
+
+        for part_number in C8000_SECURE_LICENSE_PARTS.get(size, {}).get(variant, []):
+            extras.extend(find_part_rows(workbooks, part_number, selected_model, quote_quantity, option_key, line, "License"))
+
+    return extras
 
 
 def load_detail_bom_workbooks() -> List[Any]:
@@ -230,6 +406,7 @@ def fallback_selected_device_row(
         "group": line.get("group", ""),
         "item_type": line.get("item_type", ""),
         "selected_model": model,
+        "component_type": "Fallback",
         "source_sheet": selected.get("sheet", ""),
         "line_number": "",
         "part_number": model,
@@ -259,6 +436,7 @@ def aggregate_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         key = (
             row.get("part_number", ""),
             row.get("description", ""),
+            row.get("component_type", ""),
             row.get("selling_price", 0),
             row.get("list_price", 0),
         )
@@ -267,6 +445,7 @@ def aggregate_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if key_text not in grouped:
             grouped[key_text] = dict(row)
             grouped[key_text]["selected_model"] = row.get("selected_model", "")
+            grouped[key_text]["component_type"] = row.get("component_type", "")
             grouped[key_text]["item_type"] = row.get("item_type", "")
             grouped[key_text]["group"] = row.get("group", "")
             continue
@@ -276,7 +455,7 @@ def aggregate_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         target["extended_list_price"] = to_float(target.get("extended_list_price"), 0) + to_float(row.get("extended_list_price"), 0)
         target["extended_selling_price"] = to_float(target.get("extended_selling_price"), 0) + to_float(row.get("extended_selling_price"), 0)
 
-        for field in ["selected_model", "item_type", "group", "source_sheet"]:
+        for field in ["selected_model", "component_type", "item_type", "group", "source_sheet"]:
             current_values = [v.strip() for v in str(target.get(field) or "").split(";") if v.strip()]
             new_value = str(row.get(field) or "").strip()
 
@@ -288,6 +467,138 @@ def aggregate_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return list(grouped.values())
 
 
+def group_header_row(option_key: str, group_name: str) -> Dict[str, Any]:
+    return {
+        "option": option_key,
+        "group": group_name,
+        "item_type": "",
+        "selected_model": "",
+        "component_type": "Group Header",
+        "source_sheet": "",
+        "line_number": "",
+        "part_number": group_name,
+        "smart_account_mandatory": "",
+        "description": group_name,
+        "group_name": "",
+        "service_duration_months": "",
+        "estimated_lead_time_days": "",
+        "included_item": "",
+        "quantity_per_unit": "",
+        "quote_quantity": "",
+        "total_quantity": "",
+        "pricing_term": "",
+        "list_price": "",
+        "extended_list_price": "",
+        "discount_percent": "",
+        "selling_price": "",
+        "extended_selling_price": "",
+        "service_type": "",
+        "is_group_header": True,
+    }
+
+
+def subtotal_row(option_key: str, group_name: str, block_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "option": option_key,
+        "group": group_name,
+        "item_type": "",
+        "selected_model": "",
+        "component_type": "SubTotal",
+        "source_sheet": "",
+        "line_number": "",
+        "part_number": "",
+        "smart_account_mandatory": "",
+        "description": "",
+        "group_name": "",
+        "service_duration_months": "",
+        "estimated_lead_time_days": "",
+        "included_item": "",
+        "quantity_per_unit": "",
+        "quote_quantity": "",
+        "total_quantity": "",
+        "pricing_term": "",
+        "list_price": "",
+        "extended_list_price": sum(to_float(row.get("extended_list_price"), 0) for row in block_rows),
+        "discount_percent": "SubTotal",
+        "selling_price": "",
+        "extended_selling_price": sum(to_float(row.get("extended_selling_price"), 0) for row in block_rows),
+        "service_type": "",
+        "is_subtotal": True,
+    }
+
+
+def estimate_total_row(option_key: str, total: float) -> Dict[str, Any]:
+    return {
+        "option": option_key,
+        "group": "",
+        "item_type": "",
+        "selected_model": "",
+        "component_type": "Estimate Total",
+        "source_sheet": "",
+        "line_number": "",
+        "part_number": "",
+        "smart_account_mandatory": "",
+        "description": "",
+        "group_name": "",
+        "service_duration_months": "",
+        "estimated_lead_time_days": "",
+        "included_item": "",
+        "quantity_per_unit": "",
+        "quote_quantity": "",
+        "total_quantity": "",
+        "pricing_term": "",
+        "list_price": "",
+        "extended_list_price": "",
+        "discount_percent": "Estimate Total",
+        "selling_price": "",
+        "extended_selling_price": total,
+        "service_type": "",
+        "is_estimate_total": True,
+    }
+
+
+def renumber_line_number(original: Any, block_number: int) -> str:
+    text = str(original or "").strip()
+
+    if not text:
+        return f"{block_number}.0"
+
+    if is_integer_line_number(text):
+        return f"{block_number}.0"
+
+    if "." in text:
+        suffix = text.split(".", 1)[1]
+        return f"{block_number}.{suffix}"
+
+    return f"{block_number}.0"
+
+
+def renumber_part_rows(rows: List[Dict[str, Any]], block_number: int) -> List[Dict[str, Any]]:
+    result = []
+    used = set()
+    last_simple_decimal = -1
+
+    for row in rows:
+        item = dict(row)
+        new_line_number = renumber_line_number(item.get("line_number"), block_number)
+        parts = new_line_number.split(".")
+
+        if len(parts) == 2 and parts[1].isdigit():
+            decimal_value = int(parts[1])
+
+            if new_line_number in used:
+                decimal_value = last_simple_decimal + 1
+                new_line_number = f"{block_number}.{decimal_value}"
+
+            last_simple_decimal = max(last_simple_decimal, decimal_value)
+
+        used.add(new_line_number)
+        item["line_number"] = new_line_number
+        result.append(item)
+
+    return result
+
+
 def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
     quote = quote_data.get("quote", quote_data)
     quote_lines = quote.get("quote_lines", [])
@@ -296,6 +607,8 @@ def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
 
     for option_key, option_label in OPTIONS:
         rows = []
+        current_group = None
+        block_number = 1
 
         for line in quote_lines:
             selected = (line.get("selected") or {}).get(option_key) or {}
@@ -305,26 +618,44 @@ def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
             if not model or quote_quantity <= 0:
                 continue
 
+            group = str(line.get("group") or "Khác")
+
+            if group != current_group:
+                rows.append(group_header_row(option_key, group))
+                current_group = group
+
             parts = find_bundle_parts(workbooks, model, quote_quantity, option_key, line)
 
             if not parts:
                 parts = [fallback_selected_device_row(selected, quote_quantity, option_key, line)]
 
+            parts = renumber_part_rows(parts, block_number)
+            block_number += 1
             rows.extend(parts)
+            rows.append(subtotal_row(option_key, group, parts))
 
-        aggregated = aggregate_rows(rows)
-        total = sum(to_float(row.get("extended_selling_price"), 0) for row in aggregated)
+        total = sum(
+            to_float(row.get("extended_selling_price"), 0)
+            for row in rows
+            if not row.get("is_group_header") and not row.get("is_subtotal") and not row.get("is_estimate_total")
+        )
+        line_count = sum(
+            1
+            for row in rows
+            if not row.get("is_group_header") and not row.get("is_subtotal") and not row.get("is_estimate_total")
+        )
+        rows.append(estimate_total_row(option_key, total))
 
         result["options"][option_key] = {
             "label": option_label,
-            "rows": aggregated,
+            "rows": rows,
             "total": total,
-            "line_count": len(aggregated),
+            "line_count": line_count,
         }
         result["summary"][option_key] = {
             "label": option_label,
             "total": total,
-            "line_count": len(aggregated),
+            "line_count": line_count,
         }
 
     return result
@@ -346,18 +677,76 @@ def autosize_columns(ws) -> None:
 def write_rows_sheet(wb, title: str, rows: List[Dict[str, Any]]) -> None:
     ws = wb.create_sheet(title)
     header_fill = PatternFill("solid", fgColor="EAF2FF")
+    block_start_row = None
+    subtotal_rows = []
 
-    for col, column_name in enumerate(BOM_COLUMNS, start=1):
-        cell = ws.cell(row=1, column=col, value=column_name)
+    for col, (_column_key, column_label) in enumerate(BOM_COLUMN_DEFINITIONS, start=1):
+        cell = ws.cell(row=1, column=col, value=column_label)
         cell.font = Font(bold=True)
         cell.fill = header_fill
 
     for row_index, row in enumerate(rows, start=2):
-        for col, column_name in enumerate(BOM_COLUMNS, start=1):
-            ws.cell(row=row_index, column=col, value=row.get(column_name, ""))
+        if row.get("is_group_header"):
+            ws.cell(row=row_index, column=1, value=row.get("group", ""))
+            ws.merge_cells(start_row=row_index, start_column=1, end_row=row_index, end_column=len(BOM_COLUMN_DEFINITIONS))
 
-    for col_name in ["list_price", "extended_list_price", "selling_price", "extended_selling_price"]:
-        col_index = BOM_COLUMNS.index(col_name) + 1
+            cell = ws.cell(row=row_index, column=1)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1D4ED8")
+            continue
+
+        if row.get("is_subtotal") or row.get("is_estimate_total"):
+            for col, (column_key, _column_label) in enumerate(BOM_COLUMN_DEFINITIONS, start=1):
+                ws.cell(row=row_index, column=col, value=row.get(column_key, ""))
+
+            if row.get("is_subtotal"):
+                if block_start_row and block_start_row <= row_index - 1:
+                    ws.cell(row=row_index, column=BOM_COLUMN_KEYS.index("extended_list_price") + 1, value=f"=SUM(L{block_start_row}:L{row_index - 1})")
+                    ws.cell(row=row_index, column=BOM_COLUMN_KEYS.index("extended_selling_price") + 1, value=f"=SUM(N{block_start_row}:N{row_index - 1})")
+
+                subtotal_rows.append(row_index)
+                block_start_row = None
+
+            if row.get("is_estimate_total") and subtotal_rows:
+                subtotal_formula = "+".join(f"N{subtotal_row}" for subtotal_row in subtotal_rows)
+                ws.cell(row=row_index, column=BOM_COLUMN_KEYS.index("extended_selling_price") + 1, value=f"={subtotal_formula}")
+
+            fill = PatternFill("solid", fgColor="FFF4CC" if row.get("is_subtotal") else "D9EAF7")
+
+            for cell in ws[row_index]:
+                cell.font = Font(bold=True, color="0000FF" if row.get("is_estimate_total") else "000000")
+                cell.fill = fill
+
+            continue
+
+        if block_start_row is None:
+            block_start_row = row_index
+
+        for col, (column_key, _column_label) in enumerate(BOM_COLUMN_DEFINITIONS, start=1):
+            ws.cell(row=row_index, column=col, value=row.get(column_key, ""))
+
+        quantity = to_float(row.get("total_quantity"), 0)
+        list_price = to_float(row.get("list_price"), 0)
+        extended_list_price = to_float(row.get("extended_list_price"), 0)
+
+        if quantity > 0 and list_price > 0:
+            term_factor = extended_list_price / (quantity * list_price)
+            formula = f"=I{row_index}*K{row_index}"
+
+            if abs(term_factor - 1) > 0.000001:
+                formula = f"=I{row_index}*K{row_index}*{term_factor:.10g}"
+
+            ws.cell(row=row_index, column=BOM_COLUMN_KEYS.index("extended_list_price") + 1, value=formula)
+        else:
+            ws.cell(row=row_index, column=BOM_COLUMN_KEYS.index("extended_list_price") + 1, value=extended_list_price)
+
+        ws.cell(row=row_index, column=BOM_COLUMN_KEYS.index("extended_selling_price") + 1, value=f"=L{row_index}*(1-M{row_index}/100)")
+
+    for col_name in ["list_price", "extended_list_price", "extended_selling_price"]:
+        if col_name not in BOM_COLUMN_KEYS:
+            continue
+
+        col_index = BOM_COLUMN_KEYS.index(col_name) + 1
 
         for row in range(2, ws.max_row + 1):
             ws.cell(row=row, column=col_index).number_format = '$#,##0.00'
@@ -366,7 +755,7 @@ def write_rows_sheet(wb, title: str, rows: List[Dict[str, Any]]) -> None:
     ws.freeze_panes = "A2"
 
 
-def build_bom_excel(quote_data: Dict[str, Any]) -> BytesIO:
+def build_bom_excel(quote_data: Dict[str, Any], option_key: str | None = None) -> BytesIO:
     bom = build_bom(quote_data)
     wb = openpyxl.Workbook()
     summary_ws = wb.active
@@ -377,8 +766,17 @@ def build_bom_excel(quote_data: Dict[str, Any]) -> BytesIO:
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="EAF2FF")
 
-    for option_key, option_label in OPTIONS:
-        option = bom["options"][option_key]
+    selected_options = [
+        (key, label)
+        for key, label in OPTIONS
+        if option_key is None or key == option_key
+    ]
+
+    if not selected_options:
+        selected_options = OPTIONS
+
+    for selected_key, option_label in selected_options:
+        option = bom["options"][selected_key]
         summary_ws.append([option_label, option["line_count"], option["total"]])
         write_rows_sheet(wb, option_label[:31], option["rows"])
 
