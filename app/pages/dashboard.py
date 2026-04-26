@@ -145,7 +145,7 @@ def render_dashboard_page():
             <h2>Báo giá & cập nhật giá</h2>
             <p>AM upload file BOM để hệ thống lấy giá theo logic catalog hiện có. Nếu BOM có cột giá AM, hệ thống có thể lưu thành giá override cho các lần báo giá sau.</p>
             <div class="module-actions">
-                <a class="btn btn-primary" href="/pricing">Mở báo giá BOM</a>
+                <a class="btn btn-primary" href="/pricing">Bắt đầu</a>
             </div>
         </div>
     </div>
