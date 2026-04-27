@@ -38,6 +38,32 @@ BASE_STYLE = """
         overflow-x: auto;
         padding-bottom: 2px;
     }
+    .app-sub-nav {
+        max-width: 1400px;
+        margin: -4px auto 0;
+        padding: 0 24px 10px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+        overflow-x: auto;
+    }
+    .app-sub-nav-link {
+        color: #475569;
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 6px 9px;
+        border-radius: 8px;
+        white-space: nowrap;
+    }
+    .app-sub-nav-link:hover {
+        background: #e0edff;
+        color: #1d4ed8;
+    }
+    .app-sub-nav-link.active {
+        background: #dbeafe;
+        color: #1d4ed8;
+    }
     .app-nav-link {
         color: #475569;
         text-decoration: none;
@@ -293,6 +319,10 @@ BASE_STYLE = """
         .app-nav-links {
             width: 100%;
         }
+        .app-sub-nav {
+            justify-content: flex-start;
+            padding: 0 24px 10px;
+        }
     }
 </style>
 """
@@ -309,11 +339,24 @@ def render_nav(active: str = "") -> str:
         f'<a class="app-nav-link{" active" if key == active or (key == "solution" and solution_active) else ""}" href="{href}">{label}</a>'
         for key, href, label in items
     )
+    solution_items = [
+        ("survey", "/survey", "Kh&#7843;o s&#225;t"),
+        ("calculation", "/calculation-results", "K&#7871;t qu&#7843;"),
+        ("topology", "/topology", "Topo"),
+        ("quote", "/quote", "Ch&#7885;n model"),
+        ("bom", "/bom", "BOM"),
+    ]
+    solution_links = "".join(
+        f'<a class="app-sub-nav-link{" active" if key == active else ""}" href="{href}">{label}</a>'
+        for key, href, label in solution_items
+    )
+    sub_nav = f'<div class="app-sub-nav">{solution_links}</div>' if solution_active else ""
     return f"""
 <nav class="app-nav">
     <div class="app-nav-inner">
         <a class="app-brand" href="/dashboard">Network Quotation</a>
         <div class="app-nav-links">{links}</div>
     </div>
+    {sub_nav}
 </nav>
 """

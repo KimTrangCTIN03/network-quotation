@@ -18,7 +18,7 @@ ICON_FILES = {
     "access-switch": "network-core/access-switch.png",
     "ap-indoor": "wireless/access-point-indoor.png",
     "ap-outdoor": "wireless/access-point-outdoor.png",
-    "server": "datacenter/server-farm.png",
+    "server": "datacenter/server.png",
     "storage": "datacenter/storage.png",
     "internet": "wan/internet-cloud.png",
     "wan-cloud": "wan/wan-cloud.png",
@@ -110,6 +110,7 @@ TOPOLOGY_PAGE = """
             min-height: 560px;
             max-height: calc(100vh - 250px);
             overscroll-behavior: contain;
+            touch-action: none;
         }
 
         .topology-canvas-wrap.panning {
@@ -118,7 +119,7 @@ TOPOLOGY_PAGE = """
 
         #topologyCanvas {
             width: 2200px;
-            height: 1300px;
+            height: 1420px;
             display: block;
             background-color: #ffffff;
             background-image:
@@ -151,17 +152,6 @@ TOPOLOGY_PAGE = """
             stroke-width: 1.7;
         }
 
-        .link-label-bg {
-            fill: #ffffff;
-            stroke: #cbd5e1;
-            stroke-width: 1;
-        }
-
-        .link-label {
-            font: 700 11px Arial, sans-serif;
-            fill: #334155;
-        }
-
         .topo-node {
             cursor: move;
         }
@@ -177,17 +167,17 @@ TOPOLOGY_PAGE = """
         }
 
         .node-title {
-            font: 800 15px Arial, sans-serif;
+            font: 800 10px Arial, sans-serif;
             fill: #0f172a;
         }
 
         .node-desc {
-            font: 11.5px Arial, sans-serif;
+            font: 8px Arial, sans-serif;
             fill: #475569;
         }
 
         .node-qty {
-            font: 800 11.5px Arial, sans-serif;
+            font: 800 8px Arial, sans-serif;
             fill: #1d4ed8;
         }
 
@@ -204,12 +194,6 @@ TOPOLOGY_PAGE = """
             stroke: #ffffff;
             stroke-width: 3px;
             stroke-linejoin: round;
-        }
-
-        .junction {
-            fill: #334155;
-            stroke: #ffffff;
-            stroke-width: 2;
         }
 
         .sidebar-title {
@@ -248,14 +232,22 @@ TOPOLOGY_PAGE = """
             z-index: 1;
         }
 
-        .building-zone-box {
-            fill: transparent;
+        .building-zone-box,
+        .wan-site-zone-box {
+            fill: #eff6ff;
+            fill-opacity: 0.48;
             stroke: #cbd5e1;
             stroke-width: 1;
             stroke-dasharray: 6 5;
         }
 
-        .building-zone-title {
+        .wan-site-zone-box {
+            fill: #ecfdf5;
+            stroke: #86efac;
+        }
+
+        .building-zone-title,
+        .wan-site-zone-title {
             font: 800 12px Arial, sans-serif;
             fill: #334155;
         }
@@ -288,9 +280,8 @@ __NAV__
             <h1>Topo</h1>
         </div>
         <div class="topology-actions">
-            <button class="btn btn-secondary" type="button" onclick="resetLayout()">Sắp xếp lại</button>
             <button class="btn btn-secondary" type="button" onclick="exportPng()">Xuất ảnh</button>
-            <a class="btn btn-primary" href="/quote">Chọn model</a>
+            <a class="btn btn-primary" href="/quote" onclick="saveTopologyLayout(false)">Chọn model</a>
         </div>
     </div>
 
@@ -302,8 +293,15 @@ __NAV__
                 <div class="section-title" style="margin:0;">Sơ đồ tổng quan</div>
             </div>
 
+            <div class="topology-actions" style="justify-content:flex-end;margin-bottom:10px;">
+                <button class="btn btn-secondary" type="button" onclick="focusZone('all')">Toàn bộ</button>
+                <button class="btn btn-secondary" type="button" onclick="focusZone('campus')">Tòa nhà</button>
+                <button class="btn btn-secondary" type="button" onclick="focusZone('serverFarm')">Server Farm</button>
+                <button class="btn btn-secondary" type="button" onclick="focusZone('wan')">WAN</button>
+            </div>
+
             <div class="topology-canvas-wrap">
-                <svg id="topologyCanvas" viewBox="0 0 2200 1300" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"></svg>
+                <svg id="topologyCanvas" viewBox="0 0 2200 2200" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"></svg>
             </div>
         </div>
 
@@ -328,34 +326,42 @@ __NAV__
 <script>
 const ICONS = __ICON_DATA__;
 const CANVAS_W = 2200;
-const CANVAS_H = 1300;
-const STORAGE_KEY = "topologyLayout:fixed-tier-v1";
+const CANVAS_H = 2200;
+const STORAGE_KEY = "topologyLayout:fixed-tier-v5";
 
 const NODE_W = 132;
-const NODE_H = 120;
-const ICON = 56;
-const CLUSTER_ICON = 44;
+const NODE_H = 100;
+const ICON = 100 ;
+const CLUSTER_ICON = 70;
+const ENDPOINT_ICON = 64;
+const TEXT_Y = {
+    title: 80,
+    desc: 90,
+    qty: 100
+};
 const MIN_X_GAP = 36;
 const MIN_Y_GAP = 0;
 const ZONE_MARGIN = 35;
 
 let topologyLines = [];
 let topologyMeta = {
-    buildings: []
+    buildings: [],
+    wanSites: []
 };
 let nodes = [];
 let links = [];
 let dragState = null;
 let panState = null;
 let zoom = 1;
+let topologyView = "overview";
 
 const ZONES = {
     campus: {
         title: "Campus - Trụ sở chính",
-        x: 40,
-        y: 40,
-        w: 780,
-        h: 850
+        x: 20,
+        y: 30,
+        w: 830,
+        h: 1220
     },
     serverFarm: {
         title: "Server Farm",
@@ -367,9 +373,9 @@ const ZONES = {
     wan: {
         title: "WAN",
         x: 180,
-        y: 900,
+        y: 1320,
         w: 1880,
-        h: 360
+        h: 780
     }
 };
 
@@ -420,6 +426,13 @@ const LAYOUT = {
     wanCloud:       { x: 380,  y: 980, zone: "wan" },
     wanRouter:      { x: 600,  y: 980, zone: "wan" },
 
+    wanAccessBranch1:{ x: 860,  y: 990,  zone: "wan" },
+    wanApBranch1:   { x: 1130, y: 990,  zone: "wan" },
+    wanUsersBranch1:{ x: 1360, y: 990,  zone: "wan" },
+    wanAccessBranch2:{ x: 860,  y: 1160, zone: "wan" },
+    wanApBranch2:   { x: 1130, y: 1160, zone: "wan" },
+    wanUsersBranch2:{ x: 1360, y: 1160, zone: "wan" },
+
     wanAccess48:    { x: 850,  y: 1040, zone: "wan" },
     wanAccess24:    { x: 1050, y: 1040, zone: "wan" },
     wanAccess16:    { x: 1250, y: 1040, zone: "wan" },
@@ -428,7 +441,16 @@ const LAYOUT = {
     wanAp:          { x: 1650, y: 1040, zone: "wan" },
     wanUsers:       { x: 1850, y: 1040, zone: "wan" },
     wanUsers2:      { x: 1850, y: 950, zone: "wan" },
-    wanUsers3:      { x: 1850, y: 1130, zone: "wan" }
+    wanUsers3:      { x: 1850, y: 1130, zone: "wan" },
+
+    wanAp1:         { x: 850,  y: 1140, zone: "wan" },
+    wanBranchUsers1:{ x: 850,  y: 1220, zone: "wan" },
+    wanAp2:         { x: 1050, y: 1140, zone: "wan" },
+    wanBranchUsers2:{ x: 1050, y: 1220, zone: "wan" },
+    wanAp3:         { x: 1250, y: 1140, zone: "wan" },
+    wanBranchUsers3:{ x: 1250, y: 1220, zone: "wan" },
+    wanAp4:         { x: 1450, y: 1140, zone: "wan" },
+    wanBranchUsers4:{ x: 1450, y: 1220, zone: "wan" }
 };
 
 const SAMPLE_LINES = [
@@ -578,10 +600,9 @@ function linkLabel(base, groupNeedle, speed) {
         : base;
 }
 
-function createNode(id, title, desc, qty, type, icon, posKey, options = {}) {
+function createNodeAt(id, title, desc, qty, type, icon, pos, options = {}) {
     if (!qty || qty <= 0) return null;
 
-    const pos = LAYOUT[posKey];
     return {
         id,
         title,
@@ -594,8 +615,13 @@ function createNode(id, title, desc, qty, type, icon, posKey, options = {}) {
         y: pos.y,
         baseX: pos.x,
         baseY: pos.y,
-        isCluster: Boolean(options.isCluster)
+        isCluster: Boolean(options.isCluster),
+        hideQty: Boolean(options.hideQty) || type === "cloud"
     };
+}
+
+function createNode(id, title, desc, qty, type, icon, posKey, options = {}) {
+    return createNodeAt(id, title, desc, qty, type, icon, LAYOUT[posKey], options);
 }
 
 function switchQtyFromBuilding(building) {
@@ -604,7 +630,58 @@ function switchQtyFromBuilding(building) {
 }
 
 function nodeQtyFromBuilding(building) {
-    return parseQuantity(building.node_count ?? building.nodes ?? building.node_per_floor ?? building.users ?? 0);
+    const explicitNodes = parseQuantity(building.node_count ?? building.nodes ?? building.users ?? 0);
+    if (explicitNodes) return explicitNodes;
+
+    const floors = parseQuantity(building.floors ?? 1) || 1;
+    const nodePerFloor = parseQuantity(building.node_per_floor ?? 0);
+
+    return floors * nodePerFloor;
+}
+
+function dynamicBuildingPosition(index, part) {
+    const columns = topologyView === "building" ? 4 : 3;
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const x = (topologyView === "building" ? 75 : 105) + col * 205;
+    const y = 590 + row * 310;
+
+    const offsets = {
+        access: { x: 55, y: 0 },
+        ap: { x: 55, y: 105 },
+        users: { x: 0, y: 180 },
+        usersB: { x: 110, y: 180 }
+    };
+
+    const offset = offsets[part] || { x: 0, y: 0 };
+    return { x: x + offset.x, y: y + offset.y, zone: "campus" };
+}
+
+function visibleBuildingIds() {
+    return nodes
+        .filter(node => node.id.startsWith("buildingAccess"))
+        .map(node => node.id)
+        .sort((a, b) => Number(a.replace("buildingAccess", "")) - Number(b.replace("buildingAccess", "")));
+}
+
+function dynamicWanPosition(index, part) {
+    const row = index;
+    const y = (topologyView === "wan" ? 1080 : 990) + row * 170;
+    const offsets = {
+        access: { x: topologyView === "wan" ? 960 : 860, y: 0 },
+        ap: { x: topologyView === "wan" ? 1190 : 1130, y: 0 },
+        users: { x: topologyView === "wan" ? 1390 : 1360, y: 0 }
+    };
+
+    const offset = offsets[part] || { x: 0, y: 0 };
+    return { x: offset.x, y: y + offset.y, zone: "wan" };
+}
+
+function visibleWanAccessIds() {
+    return nodes
+        .filter(node => node.id.startsWith("wanAccessBranch"))
+        .map(node => node.id)
+        .sort((a, b) => Number(a.replace("wanAccessBranch", "")) - Number(b.replace("wanAccessBranch", "")));
 }
 
 function normalizeBuildingDetails(rawBuildings) {
@@ -620,7 +697,47 @@ function normalizeBuildingDetails(rawBuildings) {
 }
 
 function visibleBuildings() {
-    return (topologyMeta.buildings || []).slice(0, 3);
+    const buildings = topologyMeta.buildings || [];
+    return topologyView === "building" ? buildings : buildings.slice(0, 3);
+}
+
+function normalizeWanDetails(rawSites) {
+    return (rawSites || [])
+        .map((site, index) => {
+            const switches = site.switches || {};
+            const accessQty = Object.values(switches).reduce((sum, value) => sum + parseQuantity(value), 0);
+
+            return {
+                name: String(site.name || `WAN ${index + 1}`),
+                routerQty: parseQuantity(site.router_quantity ?? 1),
+                accessQty,
+                apQty: parseQuantity(site.ap_quantity ?? 0),
+                userQty: parseQuantity(site.node_count ?? site.users ?? 0),
+                raw: site
+            };
+        })
+        .filter(site => site.routerQty || site.accessQty || site.apQty || site.userQty);
+}
+
+function visibleWanSites() {
+    const sites = topologyMeta.wanSites || [];
+    return topologyView === "wan" ? sites : sites.slice(0, 2);
+}
+
+function updateZonesForView() {
+    const buildingRows = Math.max(1, Math.ceil(visibleBuildings().length / 3));
+    const wanRows = Math.max(1, visibleWanSites().length || 1);
+
+    ZONES.campus.h = topologyView === "building"
+        ? Math.max(870, 590 + buildingRows * 310)
+        : 870;
+
+    ZONES.wan.y = topologyView === "building"
+        ? Math.max(930, ZONES.campus.y + ZONES.campus.h + 30)
+        : 930;
+    ZONES.wan.h = topologyView === "wan"
+        ? Math.max(440, 250 + wanRows * 170)
+        : 440;
 }
 
 function buildCampus(agg) {
@@ -657,12 +774,12 @@ function buildCampus(agg) {
     if (buildings.length) {
         buildings.forEach((building, index) => {
             const idx = index + 1;
-            result.push(createNode(`buildingAccess${idx}`, "Access", building.name, building.accessQty || 1, "access", "access-switch", `buildingAccess${idx}`));
+            result.push(createNodeAt(`buildingAccess${idx}`, "Access", building.name, building.accessQty || 1, "access", "access-switch", dynamicBuildingPosition(index, "access")));
             if (building.apQty) {
-                result.push(createNode(`buildingAp${idx}`, "AP Indoor", "Wireless", building.apQty, "ap", "ap-indoor", `buildingAp${idx}`));
+                result.push(createNodeAt(`buildingAp${idx}`, "AP Indoor", "Wireless", building.apQty, "ap", "ap-indoor", dynamicBuildingPosition(index, "ap")));
             }
-            result.push(createNode(`buildingUsers${idx}`, "Users", "Endpoints", building.userQty || 1, "endpoint", "users", `buildingUsers${idx}`));
-            result.push(createNode(`buildingUsers${idx}b`, "Users", "Guest / IoT", 1, "endpoint", "users", `buildingUsers${idx}b`));
+            result.push(createNodeAt(`buildingUsers${idx}`, "Users", "Endpoints", building.userQty || 1, "endpoint", "users", dynamicBuildingPosition(index, "users")));
+            result.push(createNodeAt(`buildingUsers${idx}b`, "Users", "Guest / IoT", 1, "endpoint", "users", dynamicBuildingPosition(index, "usersB")));
         });
     } else {
         result.push(createNode("access48", "Access", "48GE RJ45", agg.access48, "access", "access-switch", "access48"));
@@ -690,18 +807,26 @@ function buildServerFarm(agg) {
         result.push(createNode("spine", "Spine/Core", "Server Farm", agg.sfSpine, "core", "spine-core", "sfSpine"));
     }
 
-    result.push(createNode("sfLeaf100", "Leaf", "100G", agg.sfLeaf100, "access", "leaf", "sfLeaf100"));
-    result.push(createNode("sfLeaf10Sfp", "Leaf", "48x10G SFP", agg.sfLeaf10Sfp, "access", "leaf", "sfLeaf10Sfp"));
-    result.push(createNode("sfLeaf10Rj45", "Leaf", "48x10G RJ45", agg.sfLeaf10Rj45, "access", "leaf", "sfLeaf10Rj45"));
-    result.push(createNode("sfLeaf1Sfp", "Leaf", "48x1G SFP", agg.sfLeaf1Sfp, "access", "leaf", "sfLeaf1Sfp"));
-    result.push(createNode("sfLeaf1Rj45", "Leaf", "48x1G RJ45", agg.sfLeaf1Rj45, "access", "leaf", "sfLeaf1Rj45"));
+    const leafDefs = [
+        ["sfLeaf100", "Leaf", "100G", agg.sfLeaf100, "sfServer1", "Server", "Application", "server"],
+        ["sfLeaf10Sfp", "Leaf", "48x10G SFP", agg.sfLeaf10Sfp, "sfServer2", "Storage", "Storage / DB", "storage"],
+        ["sfLeaf10Rj45", "Leaf", "48x10G RJ45", agg.sfLeaf10Rj45, "sfServer3", "Server", "Compute", "server"],
+        ["sfLeaf1Rj45", "Leaf", "48x1G RJ45", agg.sfLeaf1Rj45, "sfServer4", "Server", "Database", "server"],
+        ["sfLeaf1Sfp", "Leaf", "48x1G SFP", agg.sfLeaf1Sfp, "sfServer5", "Storage", "Backup", "storage"]
+    ];
 
-    if (agg.sfSpine || agg.sfLeaf100 || agg.sfLeaf10Sfp || agg.sfLeaf10Rj45 || agg.sfLeaf1Sfp || agg.sfLeaf1Rj45) {
+    leafDefs.forEach(([leafId, title, desc, qty]) => {
+        result.push(createNode(leafId, title, desc, qty, "access", "leaf", leafId));
+    });
+
+    leafDefs.forEach(([leafId, , , qty, serverId, serverTitle, serverDesc, serverIcon]) => {
+        if (qty > 0) {
+            result.push(createNode(serverId, serverTitle, serverDesc, 1, "server", serverIcon, serverId));
+        }
+    });
+
+    if (agg.sfSpine && !leafDefs.some(([, , , qty]) => qty > 0)) {
         result.push(createNode("sfServer1", "Server", "Application", 1, "server", "server", "sfServer1"));
-        result.push(createNode("sfServer2", "Storage", "Storage / DB", 1, "server", "storage", "sfServer2"));
-        result.push(createNode("sfServer3", "Server", "Compute", 1, "server", "server", "sfServer3"));
-        result.push(createNode("sfServer4", "Server", "Database", 1, "server", "server", "sfServer4"));
-        result.push(createNode("sfServer5", "Storage", "Backup", 1, "server", "storage", "sfServer5"));
     }
 
     return result.filter(Boolean);
@@ -709,12 +834,15 @@ function buildServerFarm(agg) {
 
 function buildWan(agg) {
     const result = [];
+    const wanSites = visibleWanSites();
+    const wanRouterQty = (agg.wanRouterSmall || 0) + (agg.wanRouterLarge || 0);
+    const wanAccessQty = (agg.wanAccess48 || 0) + (agg.wanAccess24 || 0) + (agg.wanAccess16 || 0) + (agg.wanAccess8 || 0);
+    const hasWan = wanRouterQty || wanAccessQty || agg.wanAp;
 
-    if (agg.wanRouterSmall || agg.wanRouterLarge) {
+    if (hasWan) {
         result.push(createNode("wanCloud", "WAN Cloud", "Carrier WAN", 1, "cloud", "wan-cloud", "wanCloud"));
     }
 
-    const wanRouterQty = (agg.wanRouterSmall || 0) + (agg.wanRouterLarge || 0);
     result.push(createNode(
         wanRouterQty >= 2 ? "wanRouterCluster" : "wanRouter",
         wanRouterQty >= 2 ? "WAN Router Cluster" : "WAN Router",
@@ -723,20 +851,30 @@ function buildWan(agg) {
         "router",
         "wan-router",
         "wanRouter",
-        { isCluster: wanRouterQty >= 2 }
+        { isCluster: wanRouterQty >= 2, hideQty: wanRouterQty >= 2 }
     ));
 
-    result.push(createNode("wanAccess48", "WAN Access", "48GE RJ45", agg.wanAccess48, "access", "access-switch", "wanAccess48"));
-    result.push(createNode("wanAccess24", "WAN Access", "24GE RJ45", agg.wanAccess24, "access", "access-switch", "wanAccess24"));
-    result.push(createNode("wanAccess16", "WAN Access", "16GE RJ45", agg.wanAccess16, "access", "access-switch", "wanAccess16"));
-    result.push(createNode("wanAccess8", "WAN Access", "8GE RJ45", agg.wanAccess8, "access", "access-switch", "wanAccess8"));
+    if (wanSites.length) {
+        wanSites.forEach((site, index) => {
+            const idx = index + 1;
+            result.push(createNodeAt(`wanAccessBranch${idx}`, "WAN Access", site.name, site.accessQty || 1, "access", "access-switch", dynamicWanPosition(index, "access")));
+            result.push(createNodeAt(`wanApBranch${idx}`, "WAN AP", "Wireless", site.apQty || 1, "ap", "ap-indoor", dynamicWanPosition(index, "ap")));
+            result.push(createNodeAt(`wanUsersBranch${idx}`, "Branch Users", site.name, site.userQty || 1, "endpoint", "users", dynamicWanPosition(index, "users")));
+        });
+    } else {
+        const branchCount = wanRouterQty >= 2 ? 2 : (hasWan ? 1 : 0);
+        const accessPerBranch = Math.max(1, Math.ceil((wanAccessQty || branchCount) / Math.max(branchCount, 1)));
+        const apPerBranch = Math.max(1, Math.ceil((agg.wanAp || branchCount) / Math.max(branchCount, 1)));
 
-    result.push(createNode("wanAp", "WAN AP", "Wireless", agg.wanAp, "ap", "ap-indoor", "wanAp"));
+        for (let idx = 1; idx <= branchCount; idx += 1) {
+            const remainingAccess = Math.max(1, (wanAccessQty || branchCount) - accessPerBranch * (idx - 1));
+            const remainingAp = Math.max(1, (agg.wanAp || branchCount) - apPerBranch * (idx - 1));
+            const index = idx - 1;
 
-    if (agg.wanAccess48 || agg.wanAccess24 || agg.wanAccess16 || agg.wanAccess8 || agg.wanAp) {
-        result.push(createNode("wanUsers", "Branch Users", "Endpoints", 1, "endpoint", "users", "wanUsers"));
-        result.push(createNode("wanUsers2", "Branch Users", "Site Users", 1, "endpoint", "users", "wanUsers2"));
-        result.push(createNode("wanUsers3", "Branch Users", "Remote Users", 1, "endpoint", "users", "wanUsers3"));
+            result.push(createNodeAt(`wanAccessBranch${idx}`, "WAN Access", `Site ${idx}`, Math.min(accessPerBranch, remainingAccess), "access", "access-switch", dynamicWanPosition(index, "access")));
+            result.push(createNodeAt(`wanApBranch${idx}`, "WAN AP", "Wireless", Math.min(apPerBranch, remainingAp), "ap", "ap-indoor", dynamicWanPosition(index, "ap")));
+            result.push(createNodeAt(`wanUsersBranch${idx}`, "Branch Users", `Site ${idx}`, 1, "endpoint", "users", dynamicWanPosition(index, "users")));
+        }
     }
 
     return result.filter(Boolean);
@@ -747,7 +885,7 @@ function nodeBox(node) {
         x: node.x,
         y: node.y,
         w: NODE_W,
-        h: 100
+        h: 116
     };
 }
 
@@ -841,7 +979,7 @@ function buildCampusLinks() {
     const result = [];
     const firewallId = firstExisting(["firewallCluster", "firewall"]);
     const coreId = firstExisting(["coreCluster", "core"]);
-    const buildingAccessIds = ["buildingAccess1", "buildingAccess2", "buildingAccess3"].filter(nodeExists);
+    const buildingAccessIds = visibleBuildingIds();
     const accessIds = ["access48", "access24", "access16", "access8"].filter(nodeExists);
     const apIds = ["apIndoor", "apOutdoor"].filter(nodeExists);
 
@@ -865,9 +1003,10 @@ function buildCampusLinks() {
         });
     }
 
-    buildingAccessIds.forEach((access, index) => {
-        const buildingAp = `buildingAp${index + 1}`;
-        const buildingUsers = [`buildingUsers${index + 1}`, `buildingUsers${index + 1}b`].filter(nodeExists);
+    buildingAccessIds.forEach(access => {
+        const idx = Number(access.replace("buildingAccess", ""));
+        const buildingAp = `buildingAp${idx}`;
+        const buildingUsers = [`buildingUsers${idx}`, `buildingUsers${idx}b`].filter(nodeExists);
 
         if (nodeExists(buildingAp)) {
             addLink(result, access, buildingAp, "1G PoE");
@@ -911,7 +1050,7 @@ function buildServerFarmLinks() {
     const result = [];
     const campusCore = firstExisting(["coreCluster", "core"]);
     const spine = firstExisting(["spineCluster", "spine"]);
-    const leaves = ["sfLeaf100", "sfLeaf10Sfp", "sfLeaf10Rj45", "sfLeaf1Sfp", "sfLeaf1Rj45"].filter(nodeExists);
+    const leaves = ["sfLeaf100", "sfLeaf10Sfp", "sfLeaf10Rj45", "sfLeaf1Rj45", "sfLeaf1Sfp"].filter(nodeExists);
 
     if (campusCore && spine) {
         addLink(result, campusCore, spine, "10G uplink / LACP");
@@ -924,11 +1063,24 @@ function buildServerFarmLinks() {
     }
 
     const serverIds = ["sfServer1", "sfServer2", "sfServer3", "sfServer4", "sfServer5"].filter(nodeExists);
+    const leafServerMap = {
+        sfLeaf100: "sfServer1",
+        sfLeaf10Sfp: "sfServer2",
+        sfLeaf10Rj45: "sfServer3",
+        sfLeaf1Rj45: "sfServer4",
+        sfLeaf1Sfp: "sfServer5"
+    };
 
-    if (leaves.length && serverIds.length) {
-        leaves.forEach((leaf, index) => {
-            const server = serverIds[index % serverIds.length];
-            addLink(result, leaf, server, index === 0 ? "10G / 1G" : "");
+    if (leaves.length) {
+        leaves.forEach(leaf => {
+            const server = leafServerMap[leaf];
+            if (server && nodeExists(server)) {
+                addLink(result, leaf, server, "");
+            }
+        });
+    } else if (spine && serverIds.length) {
+        serverIds.forEach(server => {
+            addLink(result, spine, server, "");
         });
     }
 
@@ -938,7 +1090,7 @@ function buildServerFarmLinks() {
 function buildWanLinks() {
     const result = [];
     const wanRouter = firstExisting(["wanRouterCluster", "wanRouter"]);
-    const wanAccess = ["wanAccess48", "wanAccess24", "wanAccess16", "wanAccess8"].filter(nodeExists);
+    const wanAccess = visibleWanAccessIds();
     const campusEdge = firstExisting(["coreCluster", "core"]);
 
     if (campusEdge && nodeExists("wanCloud")) {
@@ -957,19 +1109,30 @@ function buildWanLinks() {
         });
     }
 
-    if (wanAccess.length && nodeExists("wanAp")) {
-        addLink(result, wanAccess[wanAccess.length - 1], "wanAp", "1G PoE");
-    }
+    if (wanAccess.length) {
+        wanAccess.forEach(accessId => {
+            const idx = Number(accessId.replace("wanAccessBranch", ""));
+            const apId = `wanApBranch${idx}`;
+            const userId = `wanUsersBranch${idx}`;
 
-    const branchUsers = ["wanUsers", "wanUsers2", "wanUsers3"].filter(nodeExists);
-    if (nodeExists("wanAp") && branchUsers.length) {
-        addBusLink(result, "wanAp", branchUsers, "Wi-Fi", {
-            orientation: "horizontal"
+            if (nodeExists(apId)) {
+                addLink(result, accessId, apId, "");
+                if (nodeExists(userId)) {
+                    addLink(result, apId, userId, "");
+                }
+            } else if (nodeExists(userId)) {
+                addLink(result, accessId, userId, "");
+            }
         });
-    } else if (wanAccess.length && branchUsers.length) {
-        addBusLink(result, wanAccess[0], branchUsers, "LAN", {
-            orientation: "horizontal"
-        });
+    } else if (wanAccess.length && nodeExists("wanAp")) {
+        addLink(result, wanAccess[wanAccess.length - 1], "wanAp", "1G PoE");
+
+        const branchUsers = ["wanUsers", "wanUsers2", "wanUsers3"].filter(nodeExists);
+        if (branchUsers.length) {
+            addBusLink(result, "wanAp", branchUsers, "Wi-Fi", {
+                orientation: "horizontal"
+            });
+        }
     }
 
     return result;
@@ -977,6 +1140,8 @@ function buildWanLinks() {
 
 function buildTopology(lines) {
     const aggregate = aggregateTopologyNodes(lines);
+
+    updateZonesForView();
 
     nodes = [
         ...buildCampus(aggregate),
@@ -996,7 +1161,7 @@ function buildTopology(lines) {
 function renderZone(zone) {
     return `
         <g>
-            <rect class="zone-box" x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" rx="20"></rect>
+            <rect class="zone-box" x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" rx="20" fill="transparent" stroke="#94a3b8" stroke-width="1.15" stroke-dasharray="10 8"></rect>
             <text class="zone-title" x="${zone.x + 18}" y="${zone.y + 30}">${esc(zone.title)}</text>
         </g>
     `;
@@ -1013,7 +1178,7 @@ function renderBuildingZone(building, index) {
 
     return `
         <g>
-            <rect class="building-zone-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="14"></rect>
+            <rect class="building-zone-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="14" fill="#eff6ff" fill-opacity="0.48" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="6 5"></rect>
             <text class="building-zone-title" x="${x + 12}" y="${y + 20}">${esc(building.name)}</text>
         </g>
     `;
@@ -1023,8 +1188,32 @@ function renderBuildingZones() {
     return visibleBuildings().map(renderBuildingZone).join("");
 }
 
+function renderWanSiteZone(index) {
+    const access = nodes.find(node => node.id === `wanAccessBranch${index}`);
+    if (!access) return "";
+
+    const x = access.x - 34;
+    const y = access.y - 38;
+    const width = 690;
+    const height = 132;
+
+    return `
+        <g>
+            <rect class="wan-site-zone-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="14" fill="#ecfdf5" fill-opacity="0.48" stroke="#86efac" stroke-width="1" stroke-dasharray="6 5"></rect>
+            <text class="wan-site-zone-title" x="${x + 12}" y="${y + 20}">WAN Site ${index}</text>
+        </g>
+    `;
+}
+
+function renderWanSiteZones() {
+    return nodes
+        .filter(node => node.id.startsWith("wanAccessBranch"))
+        .map((_, index) => renderWanSiteZone(index + 1))
+        .join("");
+}
+
 function renderZones() {
-    return Object.values(ZONES).map(renderZone).join("") + renderBuildingZones();
+    return Object.values(ZONES).map(renderZone).join("") + renderBuildingZones() + renderWanSiteZones();
 }
 
 function center(node) {
@@ -1037,9 +1226,18 @@ function center(node) {
 }
 
 function getNodeIconBounds(node) {
+    if (node.type === "endpoint") {
+        return {
+            x: node.x,
+            y: node.y + 3,
+            w: ENDPOINT_ICON,
+            h: ENDPOINT_ICON
+        };
+    }
+
     if (node.isCluster) {
-        const leftX = 8;
-        const rightX = NODE_W - CLUSTER_ICON - 8;
+        const leftX = 4;
+        const rightX = NODE_W - CLUSTER_ICON - 4;
         const iconY = 4;
         return {
             x: node.x + leftX,
@@ -1059,11 +1257,12 @@ function getNodeIconBounds(node) {
 
 function getNodeAnchorPoint(node, side) {
     const bounds = getNodeIconBounds(node);
+    const inset = node.isCluster ? 7 : 18;
 
-    if (side === "top") return { x: bounds.x + bounds.w / 2, y: bounds.y };
-    if (side === "right") return { x: bounds.x + bounds.w, y: bounds.y + bounds.h / 2 };
-    if (side === "bottom") return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h };
-    return { x: bounds.x, y: bounds.y + bounds.h / 2 };
+    if (side === "top") return { x: bounds.x + bounds.w / 2, y: bounds.y + inset };
+    if (side === "right") return { x: bounds.x + bounds.w - inset, y: bounds.y + bounds.h / 2 };
+    if (side === "bottom") return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h - inset };
+    return { x: bounds.x + inset, y: bounds.y + bounds.h / 2 };
 }
 
 function edgePoint(from, to) {
@@ -1157,18 +1356,7 @@ function renderLink(link) {
         <path class="topo-link ${link.cross ? "cross" : ""}" d="${orthogonalPath(from, to)}"></path>
     `;
 
-    if (!link.label) {
-        return path;
-    }
-
-    const width = Math.max(46, link.label.length * 6.7 + 16);
-    const label = getLinkLabelPosition(link, from, to, width);
-
-    return `
-        ${path}
-        <rect class="link-label-bg" x="${label.x - width / 2}" y="${label.y - 14}" width="${width}" height="20" rx="9"></rect>
-        <text class="link-label" x="${label.x}" y="${label.y}" text-anchor="middle">${esc(link.label)}</text>
-    `;
+    return path;
 }
 
 function renderBusLink(link) {
@@ -1191,8 +1379,8 @@ function renderBusLink(link) {
     let labelY = sourceCenter.y;
 
     if (vertical) {
-        const fromPoint = getNodeAnchorPoint(from, targetCenters[0].y >= sourceCenter.y ? "bottom" : "top");
         const targetYsBelow = targetCenters[0].y >= sourceCenter.y;
+        const fromPoint = getNodeAnchorPoint(from, targetYsBelow ? "bottom" : "top");
         const targetAnchors = targets.map(target => getNodeAnchorPoint(target, targetYsBelow ? "top" : "bottom"));
         const nearestTargetY = targetYsBelow
             ? Math.min(...targetAnchors.map(point => point.y))
@@ -1234,18 +1422,7 @@ function renderBusLink(link) {
         labelY = fromPoint.y - 8;
     }
 
-    const path = `<path class="topo-link" d="${bus}"></path>`;
-
-    if (!link.label) return path;
-
-    const width = Math.max(46, link.label.length * 6.7 + 16);
-
-    return `
-        ${path}
-        <circle class="junction" cx="${labelX}" cy="${labelY + 8}" r="3"></circle>
-        <rect class="link-label-bg" x="${labelX - width / 2}" y="${labelY - 14}" width="${width}" height="20" rx="9"></rect>
-        <text class="link-label" x="${labelX}" y="${labelY}" text-anchor="middle">${esc(link.label)}</text>
-    `;
+    return `<path class="topo-link" d="${bus}"></path>`;
 }
 
 function getIconForType(node) {
@@ -1254,23 +1431,41 @@ function getIconForType(node) {
 
 function renderSingleNode(node) {
     const icon = getIconForType(node);
+    const qty = node.hideQty ? "" : `<text class="node-qty" x="${NODE_W / 2}" y="${TEXT_Y.qty}" text-anchor="middle">Qty: ${Number(node.qty || 0).toLocaleString()}</text>`;
+
+    if (node.type === "endpoint") {
+        const endpointTextX = 58;
+        const endpointQty = node.hideQty ? "" : `<text class="node-qty" x="${endpointTextX}" y="58" text-anchor="start">Qty: ${Number(node.qty || 0).toLocaleString()}</text>`;
+
+        return `
+            <g class="topo-node" data-id="${node.id}" transform="translate(${node.x}, ${node.y})">
+                <title>Kéo để di chuyển thiết bị</title>
+                <rect class="node-hitbox" x="0" y="0" width="146" height="${NODE_H}"></rect>
+                <image href="${icon}" xlink:href="${icon}" x="0" y="8" width="${ENDPOINT_ICON}" height="${ENDPOINT_ICON}" preserveAspectRatio="xMidYMid meet"></image>
+                <text class="node-title" x="${endpointTextX}" y="30" text-anchor="start">${esc(node.title)}</text>
+                <text class="node-desc" x="${endpointTextX}" y="44" text-anchor="start">${esc(node.desc)}</text>
+                ${endpointQty}
+            </g>
+        `;
+    }
 
     return `
         <g class="topo-node" data-id="${node.id}" transform="translate(${node.x}, ${node.y})">
             <title>Kéo để di chuyển thiết bị</title>
             <rect class="node-hitbox" x="0" y="0" width="${NODE_W}" height="${NODE_H}"></rect>
             <image href="${icon}" xlink:href="${icon}" x="${(NODE_W - ICON) / 2}" y="0" width="${ICON}" height="${ICON}" preserveAspectRatio="xMidYMid meet"></image>
-            <text class="node-title" x="${NODE_W / 2}" y="70" text-anchor="middle">${esc(node.title)}</text>
-            <text class="node-desc" x="${NODE_W / 2}" y="85" text-anchor="middle">${esc(node.desc)}</text>
-            <text class="node-qty" x="${NODE_W / 2}" y="100" text-anchor="middle">Qty: ${Number(node.qty || 0).toLocaleString()}</text>
+            <text class="node-title" x="${NODE_W / 2}" y="${TEXT_Y.title}" text-anchor="middle">${esc(node.title)}</text>
+            <text class="node-desc" x="${NODE_W / 2}" y="${TEXT_Y.desc}" text-anchor="middle">${esc(node.desc)}</text>
+            ${qty}
         </g>
     `;
 }
 
 function renderClusterNode(node) {
     const icon = getIconForType(node);
-    const leftX = 8;
-    const rightX = NODE_W - CLUSTER_ICON - 8;
+    const qty = node.hideQty ? "" : `<text class="node-qty" x="${NODE_W / 2}" y="${TEXT_Y.qty}" text-anchor="middle">Qty: ${Number(node.qty || 0).toLocaleString()}</text>`;
+    const leftX = 4;
+    const rightX = NODE_W - CLUSTER_ICON - 4;
     const iconY = 4;
     const linkY = iconY + CLUSTER_ICON / 2;
 
@@ -1282,9 +1477,9 @@ function renderClusterNode(node) {
             <image href="${icon}" xlink:href="${icon}" x="${leftX}" y="${iconY}" width="${CLUSTER_ICON}" height="${CLUSTER_ICON}" preserveAspectRatio="xMidYMid meet"></image>
             <image href="${icon}" xlink:href="${icon}" x="${rightX}" y="${iconY}" width="${CLUSTER_ICON}" height="${CLUSTER_ICON}" preserveAspectRatio="xMidYMid meet"></image>
             <text class="ha-label" x="${NODE_W / 2}" y="${linkY - 5}" text-anchor="middle">HA</text>
-            <text class="node-title" x="${NODE_W / 2}" y="70" text-anchor="middle">${esc(node.title)}</text>
-            <text class="node-desc" x="${NODE_W / 2}" y="85" text-anchor="middle">${esc(node.desc)}</text>
-            <text class="node-qty" x="${NODE_W / 2}" y="100" text-anchor="middle">Qty: ${Number(node.qty || 0).toLocaleString()}</text>
+            <text class="node-title" x="${NODE_W / 2}" y="${TEXT_Y.title}" text-anchor="middle">${esc(node.title)}</text>
+            <text class="node-desc" x="${NODE_W / 2}" y="${TEXT_Y.desc}" text-anchor="middle">${esc(node.desc)}</text>
+            ${qty}
         </g>
     `;
 }
@@ -1345,11 +1540,17 @@ function drag(event) {
 }
 
 function stopDrag() {
+    const shouldSave = Boolean(dragState);
+
     document.querySelectorAll(".topo-node.dragging").forEach(node => {
         node.classList.remove("dragging");
     });
 
     dragState = null;
+
+    if (shouldSave) {
+        saveTopologyLayout(false);
+    }
 }
 
 function startPan(event) {
@@ -1399,6 +1600,66 @@ function setZoom(value) {
     applyZoom();
 }
 
+function contentBox() {
+    if (!nodes.length) {
+        return { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
+    }
+
+    const margin = 42;
+    const minX = Math.max(0, Math.min(...nodes.map(node => node.x)) - margin);
+    const minY = Math.max(0, Math.min(...nodes.map(node => node.y)) - margin);
+    const maxX = Math.min(CANVAS_W, Math.max(...nodes.map(node => node.x + NODE_W)) + margin);
+    const maxY = Math.min(CANVAS_H, Math.max(...nodes.map(node => node.y + NODE_H)) + margin);
+
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+function fitViewportToBox(box) {
+    const wrap = document.querySelector(".topology-canvas-wrap");
+    if (!wrap || !box) return;
+
+    const padding = 18;
+    const nextZoom = Math.max(0.25, Math.min(1.1, Math.min(
+        (wrap.clientWidth - padding * 2) / box.w,
+        (wrap.clientHeight - padding * 2) / box.h
+    )));
+
+    setZoom(nextZoom);
+
+    wrap.scrollLeft = Math.max(0, (box.x + box.w / 2) * nextZoom - wrap.clientWidth / 2);
+    wrap.scrollTop = Math.max(0, (box.y + box.h / 2) * nextZoom - wrap.clientHeight / 2);
+}
+
+function focusZone(zoneKey) {
+    const nextView = zoneKey === "campus"
+        ? "building"
+        : zoneKey === "wan"
+            ? "wan"
+            : "overview";
+
+    if (nextView !== topologyView) {
+        topologyView = nextView;
+        buildTopology(topologyLines);
+        applySavedLayout();
+        renderTopology();
+    }
+
+    if (zoneKey === "all") {
+        fitViewportToBox(contentBox());
+        return;
+    }
+
+    const zone = ZONES[zoneKey];
+    if (!zone) return;
+
+    fitViewportToBox({
+        x: Math.max(0, zone.x - 18),
+        y: Math.max(0, zone.y - 18),
+        w: Math.min(CANVAS_W - zone.x, zone.w + 36),
+        h: Math.min(CANVAS_H - zone.y, zone.h + 36)
+    });
+}
+
 function wheelZoom(event) {
     const wrap = document.querySelector(".topology-canvas-wrap");
     const rect = wrap.getBoundingClientRect();
@@ -1415,6 +1676,26 @@ function wheelZoom(event) {
 
     wrap.scrollLeft = logicalX * zoom - (event.clientX - rect.left);
     wrap.scrollTop = logicalY * zoom - (event.clientY - rect.top);
+}
+
+function saveTopologyLayout(showMessage = true) {
+    const positions = {};
+
+    nodes.forEach(node => {
+        positions[node.id] = { x: Math.round(node.x), y: Math.round(node.y) };
+    });
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+
+    if (showMessage) {
+        const message = document.getElementById("message");
+        if (message) {
+            message.innerHTML = '<div class="success-box" style="display:block;margin-bottom:12px;">Da luu vi tri topo.</div>';
+            window.setTimeout(() => {
+                message.innerHTML = "";
+            }, 1800);
+        }
+    }
 }
 
 function applySavedLayout() {
@@ -1439,6 +1720,7 @@ function resetLayout() {
     localStorage.removeItem(STORAGE_KEY);
     buildTopology(topologyLines);
     renderTopology();
+    requestAnimationFrame(() => focusZone("all"));
 }
 
 async function svgWithEmbeddedIcons() {
@@ -1446,6 +1728,26 @@ async function svgWithEmbeddedIcons() {
 
     clone.style.width = `${CANVAS_W}px`;
     clone.style.height = `${CANVAS_H}px`;
+    clone.setAttribute("width", CANVAS_W);
+    clone.setAttribute("height", CANVAS_H);
+
+    const exportStyle = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    exportStyle.textContent = `
+        .zone-box { fill: transparent; stroke: #94a3b8; stroke-width: 1.15; stroke-dasharray: 10 8; }
+        .building-zone-box { fill: #eff6ff; fill-opacity: 0.48; stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 6 5; }
+        .wan-site-zone-box { fill: #ecfdf5; fill-opacity: 0.48; stroke: #86efac; stroke-width: 1; stroke-dasharray: 6 5; }
+        .zone-title { font: 800 18px Arial, sans-serif; fill: #0f172a; }
+        .building-zone-title, .wan-site-zone-title { font: 800 12px Arial, sans-serif; fill: #334155; }
+        .topo-link { stroke: #475569; stroke-width: 2; fill: none; }
+        .topo-link.cross { stroke-width: 1.7; }
+        .ha-link { stroke: #0f172a; stroke-width: 1.7; }
+        .ha-label { font: 800 9px Arial, sans-serif; fill: #0f172a; paint-order: stroke; stroke: #ffffff; stroke-width: 3px; stroke-linejoin: round; }
+        .node-title { font: 800 10px Arial, sans-serif; fill: #0f172a; }
+        .node-desc { font: 8px Arial, sans-serif; fill: #475569; }
+        .node-qty { font: 800 8px Arial, sans-serif; fill: #1d4ed8; }
+        .node-hitbox { fill: transparent; }
+    `;
+    clone.insertBefore(exportStyle, clone.firstChild);
 
     return new XMLSerializer().serializeToString(clone);
 }
@@ -1496,7 +1798,7 @@ function renderRequirementRows(lines) {
 function readTopologySource() {
     const raw = localStorage.getItem("quoteData");
 
-    topologyMeta = { buildings: [] };
+    topologyMeta = { buildings: [], wanSites: [] };
 
     if (!raw) return SAMPLE_LINES;
 
@@ -1504,7 +1806,8 @@ function readTopologySource() {
         const data = JSON.parse(raw);
         const requirementLines = (((data || {}).requirements || {}).requirements || []);
         topologyMeta = {
-            buildings: normalizeBuildingDetails((((data || {}).requirements || {}).building_details || []))
+            buildings: normalizeBuildingDetails((((data || {}).requirements || {}).building_details || [])),
+            wanSites: normalizeWanDetails((((data || {}).requirements || {}).wan_details || []))
         };
         const quoteLines = (((data || {}).quote || {}).quote_lines || []);
         const lines = requirementLines.length ? requirementLines : quoteLines;
@@ -1521,6 +1824,7 @@ function initTopology() {
     applySavedLayout();
     renderRequirementRows(topologyLines);
     renderTopology();
+    requestAnimationFrame(() => focusZone("all"));
 }
 
 const topologyWrap = document.querySelector(".topology-canvas-wrap");
@@ -1533,6 +1837,11 @@ window.addEventListener("pointermove", event => {
 });
 
 window.addEventListener("pointerup", () => {
+    stopDrag();
+    stopPan();
+});
+
+window.addEventListener("pointercancel", () => {
     stopDrag();
     stopPan();
 });
