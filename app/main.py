@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.bom_engine import build_bom, build_bom_excel
 from app.catalog_engine import compare_price_map_with_cisco_tab, debug_catalog_summary
@@ -10,6 +13,7 @@ from app.pages import (
     render_pricing_page,
     render_quote_page,
     render_survey_page,
+    render_topology_page,
 )
 from app.pricing.catalog import list_price_entries, save_am_price
 from app.pricing.storage import check_database
@@ -21,6 +25,8 @@ from app.schemas import AmPricePayload, BomPayload, SurveyPayload, payload_to_di
 
 
 app = FastAPI(title="Network Quotation Web")
+ICON_DIR = Path(__file__).resolve().parent.parent / "icon-library" / "project-topology-icons"
+app.mount("/icons", StaticFiles(directory=ICON_DIR), name="icons")
 
 
 @app.get("/")
@@ -46,6 +52,11 @@ def calculation_results_page():
 @app.get("/quote", response_class=HTMLResponse)
 def quote_page():
     return render_quote_page()
+
+
+@app.get("/topology", response_class=HTMLResponse)
+def topology_page():
+    return render_topology_page()
 
 
 @app.get("/bom", response_class=HTMLResponse)

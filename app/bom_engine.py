@@ -3,7 +3,7 @@ from io import BytesIO
 from typing import Any, Dict, List
 
 import openpyxl
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.catalog_engine import BOM_DIR, cell_value, is_integer_line_number, normalize_model, to_float
@@ -674,30 +674,61 @@ def autosize_columns(ws) -> None:
         ws.column_dimensions[get_column_letter(col)].width = width
 
 
+def format_group_title(group: Any) -> str:
+    return str(group or "").replace(" - ", "-").strip()
+
+
 def write_rows_sheet(wb, title: str, rows: List[Dict[str, Any]]) -> None:
     ws = wb.create_sheet(title)
-    header_fill = PatternFill("solid", fgColor="EAF2FF")
+    header_fill = PatternFill("solid", fgColor="969696")
+    thin_side = Side(style="thin", color="000000")
+    thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    group_border = Border(top=thin_side, bottom=thin_side)
+    total_border = Border(right=thin_side, bottom=thin_side)
+    header_font = Font(name="Helvetica", size=9, bold=True, color="000000")
+    normal_font = Font(name="Helvetica", size=9, color="000000")
+    bold_font = Font(name="Helvetica", size=9, bold=True, color="000000")
+    total_font = Font(name="Helvetica", size=9, bold=True, color="0000FF")
     block_start_row = None
     subtotal_rows = []
+    numeric_columns = {
+        "total_quantity",
+        "list_price",
+        "extended_list_price",
+        "discount_percent",
+        "extended_selling_price",
+    }
 
     for col, (_column_key, column_label) in enumerate(BOM_COLUMN_DEFINITIONS, start=1):
         cell = ws.cell(row=1, column=col, value=column_label)
-        cell.font = Font(bold=True)
+        cell.font = header_font
         cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    ws.row_dimensions[1].height = 58
 
     for row_index, row in enumerate(rows, start=2):
         if row.get("is_group_header"):
-            ws.cell(row=row_index, column=1, value=row.get("group", ""))
+            ws.cell(row=row_index, column=1, value=format_group_title(row.get("group", "")))
             ws.merge_cells(start_row=row_index, start_column=1, end_row=row_index, end_column=len(BOM_COLUMN_DEFINITIONS))
+            ws.row_dimensions[row_index].height = 20
 
             cell = ws.cell(row=row_index, column=1)
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="1D4ED8")
+            cell.font = bold_font
+            cell.border = group_border
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            for col in range(2, len(BOM_COLUMN_DEFINITIONS) + 1):
+                merged_cell = ws.cell(row=row_index, column=col)
+                merged_cell.border = group_border
             continue
 
         if row.get("is_subtotal") or row.get("is_estimate_total"):
             for col, (column_key, _column_label) in enumerate(BOM_COLUMN_DEFINITIONS, start=1):
-                ws.cell(row=row_index, column=col, value=row.get(column_key, ""))
+                cell = ws.cell(row=row_index, column=col, value=row.get(column_key, ""))
+                cell.font = total_font
+                cell.alignment = Alignment(horizontal="right" if column_key in numeric_columns else "left", vertical="center")
 
             if row.get("is_subtotal"):
                 if block_start_row and block_start_row <= row_index - 1:
@@ -711,11 +742,11 @@ def write_rows_sheet(wb, title: str, rows: List[Dict[str, Any]]) -> None:
                 subtotal_formula = "+".join(f"N{subtotal_row}" for subtotal_row in subtotal_rows)
                 ws.cell(row=row_index, column=BOM_COLUMN_KEYS.index("extended_selling_price") + 1, value=f"={subtotal_formula}")
 
-            fill = PatternFill("solid", fgColor="FFF4CC" if row.get("is_subtotal") else "D9EAF7")
-
-            for cell in ws[row_index]:
-                cell.font = Font(bold=True, color="0000FF" if row.get("is_estimate_total") else "000000")
-                cell.fill = fill
+            for col in range(1, len(BOM_COLUMN_DEFINITIONS) + 1):
+                cell = ws.cell(row=row_index, column=col)
+                cell.font = total_font
+                cell.border = total_border
+                cell.alignment = Alignment(horizontal="right", vertical="center")
 
             continue
 
@@ -723,7 +754,15 @@ def write_rows_sheet(wb, title: str, rows: List[Dict[str, Any]]) -> None:
             block_start_row = row_index
 
         for col, (column_key, _column_label) in enumerate(BOM_COLUMN_DEFINITIONS, start=1):
-            ws.cell(row=row_index, column=col, value=row.get(column_key, ""))
+            cell = ws.cell(row=row_index, column=col, value=row.get(column_key, ""))
+            is_base_line = str(row.get("line_number", "")).strip().endswith(".0")
+            cell.font = bold_font if column_key in {"line_number", "part_number"} and is_base_line else normal_font
+            cell.border = thin_border
+            cell.alignment = Alignment(
+                horizontal="right" if column_key in numeric_columns else "left",
+                vertical="center",
+                wrap_text=column_key in {"description", "service_type"},
+            )
 
         quantity = to_float(row.get("total_quantity"), 0)
         list_price = to_float(row.get("list_price"), 0)
@@ -749,22 +788,35 @@ def write_rows_sheet(wb, title: str, rows: List[Dict[str, Any]]) -> None:
         col_index = BOM_COLUMN_KEYS.index(col_name) + 1
 
         for row in range(2, ws.max_row + 1):
-            ws.cell(row=row, column=col_index).number_format = '$#,##0.00'
+            ws.cell(row=row, column=col_index).number_format = '#,##0.00'
 
     autosize_columns(ws)
+    preferred_widths = {
+        "A": 18,
+        "B": 36,
+        "C": 18,
+        "D": 62,
+        "E": 18,
+        "F": 18,
+        "G": 16,
+        "H": 18,
+        "I": 12,
+        "J": 16,
+        "K": 15,
+        "L": 18,
+        "M": 14,
+        "N": 18,
+        "O": 20,
+    }
+    for column_letter, width in preferred_widths.items():
+        ws.column_dimensions[column_letter].width = width
     ws.freeze_panes = "A2"
 
 
 def build_bom_excel(quote_data: Dict[str, Any], option_key: str | None = None) -> BytesIO:
     bom = build_bom(quote_data)
     wb = openpyxl.Workbook()
-    summary_ws = wb.active
-    summary_ws.title = "Summary"
-    summary_ws.append(["Option", "BOM Lines", "Total"])
-
-    for cell in summary_ws[1]:
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill("solid", fgColor="EAF2FF")
+    wb.remove(wb.active)
 
     selected_options = [
         (key, label)
@@ -777,13 +829,7 @@ def build_bom_excel(quote_data: Dict[str, Any], option_key: str | None = None) -
 
     for selected_key, option_label in selected_options:
         option = bom["options"][selected_key]
-        summary_ws.append([option_label, option["line_count"], option["total"]])
         write_rows_sheet(wb, option_label[:31], option["rows"])
-
-    for row in range(2, summary_ws.max_row + 1):
-        summary_ws.cell(row=row, column=3).number_format = '$#,##0.00'
-
-    autosize_columns(summary_ws)
 
     output = BytesIO()
     wb.save(output)

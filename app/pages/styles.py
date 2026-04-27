@@ -7,6 +7,54 @@ BASE_STYLE = """
         background: #f4f7fb;
         color: #0f172a;
     }
+    .app-nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(244, 247, 251, 0.94);
+        border-bottom: 1px solid #dbe3ef;
+        backdrop-filter: blur(12px);
+    }
+    .app-nav-inner {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 10px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+    }
+    .app-brand {
+        color: #0f172a;
+        font-size: 15px;
+        font-weight: 800;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .app-nav-links {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+    .app-nav-link {
+        color: #475569;
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 8px 10px;
+        border-radius: 8px;
+        white-space: nowrap;
+    }
+    .app-nav-link:hover {
+        background: #e0edff;
+        color: #1d4ed8;
+    }
+    .app-nav-link.active {
+        background: #2563eb;
+        color: #fff;
+    }
     .container {
         max-width: 1400px;
         margin: 0 auto;
@@ -236,5 +284,36 @@ BASE_STYLE = """
         font-family: Consolas, monospace;
         font-size: 12px;
     }
+    @media (max-width: 720px) {
+        .app-nav-inner {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .app-nav-links {
+            width: 100%;
+        }
+    }
 </style>
+"""
+
+
+def render_nav(active: str = "") -> str:
+    solution_active = active in {"survey", "calculation", "topology", "quote", "bom"}
+    items = [
+        ("dashboard", "/dashboard", "Dashboard"),
+        ("solution", "/survey", "Gi&#7843;i ph&#225;p"),
+        ("pricing", "/pricing", "Catalog gi&#225;"),
+    ]
+    links = "".join(
+        f'<a class="app-nav-link{" active" if key == active or (key == "solution" and solution_active) else ""}" href="{href}">{label}</a>'
+        for key, href, label in items
+    )
+    return f"""
+<nav class="app-nav">
+    <div class="app-nav-inner">
+        <a class="app-brand" href="/dashboard">Network Quotation</a>
+        <div class="app-nav-links">{links}</div>
+    </div>
+</nav>
 """

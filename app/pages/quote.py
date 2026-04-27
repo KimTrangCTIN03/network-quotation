@@ -1,4 +1,4 @@
-from app.pages.styles import BASE_STYLE
+from app.pages.styles import BASE_STYLE, render_nav
 
 
 def render_quote_page():
@@ -280,6 +280,7 @@ def render_quote_page():
     </style>
 </head>
 <body>
+{render_nav("quote")}
 <div class="container">
     <div class="page-header">
         <div class="page-header-left">
@@ -287,13 +288,6 @@ def render_quote_page():
             <div class="subtitle"></div>
         </div>
     </div>
-
-    <div class="stepbar">
-        <a class="step" href="/survey">1. Nhập khảo sát</a>
-        <a class="step" href="/calculation-results">2. Kết quả tính toán</a>
-        <a class="step active" href="/quote">3. Chọn model & báo giá</a>
-    </div>
-
     <div id="summary_block"></div>
     <div id="quote_block"></div>
     <div id="group_summary_block"></div>

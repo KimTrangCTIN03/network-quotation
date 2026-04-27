@@ -1,4 +1,4 @@
-from app.pages.styles import BASE_STYLE
+from app.pages.styles import BASE_STYLE, render_nav
 
 
 def render_survey_page():
@@ -122,16 +122,10 @@ def render_survey_page():
     </style>
 </head>
 <body>
+{render_nav("survey")}
 <div class="container">
     <h1>Network Quotation Tool</h1>
     <div class="subtitle"></div>
-
-    <div class="stepbar">
-        <a class="step active" href="/survey">1. Nhập khảo sát</a>
-        <a class="step" href="/calculation-results">2. Kết quả tính toán</a>
-        <a class="step" href="/quote">3. Chọn model & báo giá</a>
-    </div>
-
     <div class="card">
         <div class="section-title">1. Thông tin khảo sát Campus</div>
         <div class="grid-2">

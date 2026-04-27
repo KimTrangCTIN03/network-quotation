@@ -1,4 +1,4 @@
-from app.pages.styles import BASE_STYLE
+from app.pages.styles import BASE_STYLE, render_nav
 
 
 def render_pricing_page():
@@ -106,6 +106,7 @@ def render_pricing_page():
     </style>
 </head>
 <body>
+{render_nav("pricing")}
 <div class="container">
     <div class="topbar">
         <div>

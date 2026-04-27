@@ -1,4 +1,4 @@
-from app.pages.styles import BASE_STYLE
+from app.pages.styles import BASE_STYLE, render_nav
 
 
 def render_calculation_results_page():
@@ -11,20 +11,15 @@ def render_calculation_results_page():
     {BASE_STYLE}
 </head>
 <body>
+{render_nav("calculation")}
 <div class="container">
     <h1>Kết quả tính toán</h1>
     <div class="subtitle"></div>
-
-    <div class="stepbar">
-        <a class="step" href="/survey">1. Nhập khảo sát</a>
-        <a class="step active" href="/calculation-results">2. Kết quả tính toán</a>
-        <a class="step" href="/quote">3. Chọn model & báo giá</a>
-    </div>
-
     <div id="content"></div>
 
     <div class="actions">
         <a class="btn btn-secondary" href="/survey">Quay lại khảo sát</a>
+        <a class="btn btn-secondary" href="/topology">V&#7869; topo gi&#7843;i ph&#225;p</a>
         <a class="btn btn-primary" href="/quote">Tiếp tục chọn model & xem báo giá</a>
     </div>
 </div>

@@ -1,4 +1,4 @@
-from app.pages.styles import BASE_STYLE
+from app.pages.styles import BASE_STYLE, render_nav
 
 
 def render_dashboard_page():
@@ -121,6 +121,7 @@ def render_dashboard_page():
     </style>
 </head>
 <body>
+{render_nav("dashboard")}
 <div class="container">
     <div class="dashboard-header">
         <div class="dashboard-title">

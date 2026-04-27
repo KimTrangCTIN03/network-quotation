@@ -1,4 +1,4 @@
-from app.pages.styles import BASE_STYLE
+from app.pages.styles import BASE_STYLE, render_nav
 
 
 def render_bom_page():
@@ -16,11 +16,6 @@ def render_bom_page():
             gap: 12px;
             margin-bottom: 16px;
         }}
-
-        .stepbar {{
-            grid-template-columns: repeat(4, 1fr);
-        }}
-
         .bom-metric {{
             background: #f8fafc;
             border: 1px solid #dbe3ef;
@@ -167,16 +162,9 @@ def render_bom_page():
     </style>
 </head>
 <body>
+{render_nav("bom")}
 <div class="container">
     <h1>Xuất BOM</h1>
-
-    <div class="stepbar">
-        <a class="step" href="/survey">1. Nhập khảo sát</a>
-        <a class="step" href="/calculation-results">2. Kết quả tính toán</a>
-        <a class="step" href="/quote">3. Chọn model & báo giá</a>
-        <a class="step active" href="/bom">4. Xuất BOM</a>
-    </div>
-
     <div id="bom_block"></div>
 </div>
 
@@ -371,6 +359,7 @@ function renderBom() {{
                 <h3>${{esc(option.label)}} - ${{money(option.total || 0)}}</h3>
                 <button id="downloadBomBtn" class="btn btn-primary" type="button" onclick="downloadBom()">Download BOM</button>
             </div>
+            <div id="downloadStatus" class="small" style="margin:8px 0 12px;"></div>
             ${{renderRows(option.rows || [])}}
         </div>
     `;
@@ -380,8 +369,13 @@ async function downloadBom() {{
     const raw = localStorage.getItem("quoteData");
     const optionKey = activeOption;
     const btn = document.getElementById("downloadBomBtn");
+    const status = document.getElementById("downloadStatus");
 
     if (!raw) return;
+    if (status) {{
+        status.style.color = "#475569";
+        status.innerText = "Đang xuất BOM, vui lòng đợi...";
+    }}
 
     if (btn) {{
         btn.disabled = true;
