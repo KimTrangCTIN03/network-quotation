@@ -281,7 +281,7 @@ __NAV__
         </div>
         <div class="topology-actions">
             <button class="btn btn-secondary" type="button" onclick="exportPng()">Xuất ảnh</button>
-            <a class="btn btn-primary" href="/quote" onclick="saveTopologyLayout(false)">Chọn model</a>
+            <a class="btn btn-primary" href="/quote" onclick="saveTopologyLayout(false, true)">Chọn model</a>
         </div>
     </div>
 
@@ -298,6 +298,7 @@ __NAV__
                 <button class="btn btn-secondary" type="button" onclick="focusZone('campus')">Tòa nhà</button>
                 <button class="btn btn-secondary" type="button" onclick="focusZone('serverFarm')">Server Farm</button>
                 <button class="btn btn-secondary" type="button" onclick="focusZone('wan')">WAN</button>
+                <button class="btn btn-primary" type="button" onclick="saveTopologyLayout(true, true)">Lưu topo</button>
             </div>
 
             <div class="topology-canvas-wrap">
@@ -744,25 +745,27 @@ function buildCampus(agg) {
     const result = [];
     const buildings = visibleBuildings();
 
-    if (agg.gatewayRouter) {
+    if (topologyView !== "building" && agg.gatewayRouter) {
         result.push(createNode("internet", "Internet", "ISP / WAN", 1, "cloud", "internet", "internet"));
     }
 
-    result.push(createNode(
-        "gatewayRouter",
-        agg.gatewayRouter >= 2 ? "Router HA" : "Router",
-        agg.gatewayRouter >= 2 ? "Gateway Pair" : "Campus Gateway",
-        agg.gatewayRouter,
-        "router",
-        "gateway-router",
-        "gatewayRouter",
-        { isCluster: agg.gatewayRouter >= 2 }
-    ));
+    if (topologyView !== "building") {
+        result.push(createNode(
+            "gatewayRouter",
+            agg.gatewayRouter >= 2 ? "Router HA" : "Router",
+            agg.gatewayRouter >= 2 ? "Gateway Pair" : "Campus Gateway",
+            agg.gatewayRouter,
+            "router",
+            "gateway-router",
+            "gatewayRouter",
+            { isCluster: agg.gatewayRouter >= 2 }
+        ));
 
-    if (agg.firewall >= 2) {
-        result.push(createNode("firewallCluster", "Firewall HA", "Security Cluster", agg.firewall, "firewall", "firewall", "firewall", { isCluster: true }));
-    } else {
-        result.push(createNode("firewall", "Firewall", "Security", agg.firewall, "firewall", "firewall", "firewall"));
+        if (agg.firewall >= 2) {
+            result.push(createNode("firewallCluster", "Firewall HA", "Security Cluster", agg.firewall, "firewall", "firewall", "firewall", { isCluster: true }));
+        } else {
+            result.push(createNode("firewall", "Firewall", "Security", agg.firewall, "firewall", "firewall", "firewall"));
+        }
     }
 
     if (agg.campusCore >= 2) {
@@ -829,6 +832,22 @@ function buildServerFarm(agg) {
         result.push(createNode("sfServer1", "Server", "Application", 1, "server", "server", "sfServer1"));
     }
 
+    leafDefs.forEach(([leafId, , , qty, serverId, serverTitle, , serverIcon]) => {
+        const leaf = LAYOUT[leafId];
+        if (qty > 0 && leaf) {
+            result.push(createNodeAt(`${serverId}b`, serverTitle === "Storage" ? "Server" : "Storage", "Backup / DB", 1, "server", serverIcon === "storage" ? "server" : "storage", {
+                x: leaf.x - 58,
+                y: leaf.y + 205,
+                zone: "serverFarm"
+            }));
+            result.push(createNodeAt(`${serverId}c`, "Server", "Compute", 1, "server", "server", {
+                x: leaf.x + 58,
+                y: leaf.y + 205,
+                zone: "serverFarm"
+            }));
+        }
+    });
+
     return result.filter(Boolean);
 }
 
@@ -860,6 +879,16 @@ function buildWan(agg) {
             result.push(createNodeAt(`wanAccessBranch${idx}`, "WAN Access", site.name, site.accessQty || 1, "access", "access-switch", dynamicWanPosition(index, "access")));
             result.push(createNodeAt(`wanApBranch${idx}`, "WAN AP", "Wireless", site.apQty || 1, "ap", "ap-indoor", dynamicWanPosition(index, "ap")));
             result.push(createNodeAt(`wanUsersBranch${idx}`, "Branch Users", site.name, site.userQty || 1, "endpoint", "users", dynamicWanPosition(index, "users")));
+            result.push(createNodeAt(`wanUsersBranch${idx}b`, "Branch Users", "Endpoints", 1, "endpoint", "users", {
+                x: dynamicWanPosition(index, "users").x,
+                y: dynamicWanPosition(index, "users").y + 58,
+                zone: "wan"
+            }));
+            result.push(createNodeAt(`wanUsersBranch${idx}c`, "Branch Users", "Guest / IoT", 1, "endpoint", "users", {
+                x: dynamicWanPosition(index, "users").x,
+                y: dynamicWanPosition(index, "users").y - 58,
+                zone: "wan"
+            }));
         });
     } else {
         const branchCount = wanRouterQty >= 2 ? 2 : (hasWan ? 1 : 0);
@@ -874,6 +903,16 @@ function buildWan(agg) {
             result.push(createNodeAt(`wanAccessBranch${idx}`, "WAN Access", `Site ${idx}`, Math.min(accessPerBranch, remainingAccess), "access", "access-switch", dynamicWanPosition(index, "access")));
             result.push(createNodeAt(`wanApBranch${idx}`, "WAN AP", "Wireless", Math.min(apPerBranch, remainingAp), "ap", "ap-indoor", dynamicWanPosition(index, "ap")));
             result.push(createNodeAt(`wanUsersBranch${idx}`, "Branch Users", `Site ${idx}`, 1, "endpoint", "users", dynamicWanPosition(index, "users")));
+            result.push(createNodeAt(`wanUsersBranch${idx}b`, "Branch Users", "Endpoints", 1, "endpoint", "users", {
+                x: dynamicWanPosition(index, "users").x,
+                y: dynamicWanPosition(index, "users").y + 58,
+                zone: "wan"
+            }));
+            result.push(createNodeAt(`wanUsersBranch${idx}c`, "Branch Users", "Guest / IoT", 1, "endpoint", "users", {
+                x: dynamicWanPosition(index, "users").x,
+                y: dynamicWanPosition(index, "users").y - 58,
+                zone: "wan"
+            }));
         }
     }
 
@@ -1062,23 +1101,25 @@ function buildServerFarmLinks() {
         });
     }
 
-    const serverIds = ["sfServer1", "sfServer2", "sfServer3", "sfServer4", "sfServer5"].filter(nodeExists);
     const leafServerMap = {
-        sfLeaf100: "sfServer1",
-        sfLeaf10Sfp: "sfServer2",
-        sfLeaf10Rj45: "sfServer3",
-        sfLeaf1Rj45: "sfServer4",
-        sfLeaf1Sfp: "sfServer5"
+        sfLeaf100: ["sfServer1", "sfServer1b", "sfServer1c"],
+        sfLeaf10Sfp: ["sfServer2", "sfServer2b", "sfServer2c"],
+        sfLeaf10Rj45: ["sfServer3", "sfServer3b", "sfServer3c"],
+        sfLeaf1Rj45: ["sfServer4", "sfServer4b", "sfServer4c"],
+        sfLeaf1Sfp: ["sfServer5", "sfServer5b", "sfServer5c"]
     };
 
     if (leaves.length) {
         leaves.forEach(leaf => {
-            const server = leafServerMap[leaf];
-            if (server && nodeExists(server)) {
-                addLink(result, leaf, server, "");
+            const servers = (leafServerMap[leaf] || []).filter(nodeExists);
+            if (servers.length) {
+                addBusLink(result, leaf, servers, "", {
+                    orientation: "vertical"
+                });
             }
         });
-    } else if (spine && serverIds.length) {
+    } else if (spine) {
+        const serverIds = ["sfServer1", "sfServer1b", "sfServer1c"].filter(nodeExists);
         serverIds.forEach(server => {
             addLink(result, spine, server, "");
         });
@@ -1113,15 +1154,19 @@ function buildWanLinks() {
         wanAccess.forEach(accessId => {
             const idx = Number(accessId.replace("wanAccessBranch", ""));
             const apId = `wanApBranch${idx}`;
-            const userId = `wanUsersBranch${idx}`;
+            const userIds = [`wanUsersBranch${idx}`, `wanUsersBranch${idx}b`, `wanUsersBranch${idx}c`].filter(nodeExists);
 
             if (nodeExists(apId)) {
                 addLink(result, accessId, apId, "");
-                if (nodeExists(userId)) {
-                    addLink(result, apId, userId, "");
+                if (userIds.length) {
+                    addBusLink(result, apId, userIds, "", {
+                        orientation: "horizontal"
+                    });
                 }
-            } else if (nodeExists(userId)) {
-                addLink(result, accessId, userId, "");
+            } else if (userIds.length) {
+                addBusLink(result, accessId, userIds, "", {
+                    orientation: "horizontal"
+                });
             }
         });
     } else if (wanAccess.length && nodeExists("wanAp")) {
@@ -1143,19 +1188,35 @@ function buildTopology(lines) {
 
     updateZonesForView();
 
-    nodes = [
-        ...buildCampus(aggregate),
-        ...buildServerFarm(aggregate),
-        ...buildWan(aggregate)
-    ];
+    if (topologyView === "building") {
+        nodes = buildCampus(aggregate);
+    } else if (topologyView === "wan") {
+        nodes = buildWan(aggregate);
+    } else if (topologyView === "serverFarm") {
+        nodes = buildServerFarm(aggregate);
+    } else {
+        nodes = [
+            ...buildCampus(aggregate),
+            ...buildServerFarm(aggregate),
+            ...buildWan(aggregate)
+        ];
+    }
 
     avoidNodeOverlap();
 
-    links = [
-        ...buildCampusLinks(),
-        ...buildServerFarmLinks(),
-        ...buildWanLinks()
-    ];
+    if (topologyView === "building") {
+        links = buildCampusLinks();
+    } else if (topologyView === "wan") {
+        links = buildWanLinks();
+    } else if (topologyView === "serverFarm") {
+        links = buildServerFarmLinks();
+    } else {
+        links = [
+            ...buildCampusLinks(),
+            ...buildServerFarmLinks(),
+            ...buildWanLinks()
+        ];
+    }
 }
 
 function renderZone(zone) {
@@ -1213,6 +1274,18 @@ function renderWanSiteZones() {
 }
 
 function renderZones() {
+    if (topologyView === "building") {
+        return renderZone(ZONES.campus) + renderBuildingZones();
+    }
+
+    if (topologyView === "wan") {
+        return renderZone(ZONES.wan) + renderWanSiteZones();
+    }
+
+    if (topologyView === "serverFarm") {
+        return renderZone(ZONES.serverFarm);
+    }
+
     return Object.values(ZONES).map(renderZone).join("") + renderBuildingZones() + renderWanSiteZones();
 }
 
@@ -1540,17 +1613,11 @@ function drag(event) {
 }
 
 function stopDrag() {
-    const shouldSave = Boolean(dragState);
-
     document.querySelectorAll(".topo-node.dragging").forEach(node => {
         node.classList.remove("dragging");
     });
 
     dragState = null;
-
-    if (shouldSave) {
-        saveTopologyLayout(false);
-    }
 }
 
 function startPan(event) {
@@ -1635,7 +1702,9 @@ function focusZone(zoneKey) {
         ? "building"
         : zoneKey === "wan"
             ? "wan"
-            : "overview";
+            : zoneKey === "serverFarm"
+                ? "serverFarm"
+                : "overview";
 
     if (nextView !== topologyView) {
         topologyView = nextView;
@@ -1678,46 +1747,122 @@ function wheelZoom(event) {
     wrap.scrollTop = logicalY * zoom - (event.clientY - rect.top);
 }
 
-function saveTopologyLayout(showMessage = true) {
+function topologyFingerprint() {
+    const normalizedLines = topologyLines
+        .map(line => ({
+            group: line.group || "",
+            item_type: line.item_type || "",
+            quantity: Number(line.quantity || 0)
+        }))
+        .sort((a, b) => `${a.group}|${a.item_type}`.localeCompare(`${b.group}|${b.item_type}`));
+
+    return JSON.stringify({
+        lines: normalizedLines,
+        buildings: topologyMeta.buildings || [],
+        wanSites: topologyMeta.wanSites || []
+    });
+}
+
+function emptyLayoutStore() {
+    return {
+        fingerprint: topologyFingerprint(),
+        locked: false,
+        layouts: {}
+    };
+}
+
+function readLayoutStore() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const fingerprint = topologyFingerprint();
+
+    if (!raw) return emptyLayoutStore();
+
+    try {
+        const parsed = JSON.parse(raw);
+        const isNewSchema = parsed && typeof parsed === "object" && parsed.layouts;
+
+        if (!isNewSchema) {
+            localStorage.removeItem(STORAGE_KEY);
+            return emptyLayoutStore();
+        }
+
+        const store = parsed;
+
+        if (store.fingerprint !== fingerprint) {
+            localStorage.removeItem(STORAGE_KEY);
+            return emptyLayoutStore();
+        }
+
+        return {
+            fingerprint,
+            locked: Boolean(store.locked),
+            layouts: store.layouts || {}
+        };
+    } catch (error) {
+        localStorage.removeItem(STORAGE_KEY);
+        return emptyLayoutStore();
+    }
+}
+
+function writeLayoutStore(store) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        fingerprint: topologyFingerprint(),
+        locked: Boolean(store.locked),
+        layouts: store.layouts || {}
+    }));
+}
+
+function showTopologyMessage(text) {
+    const message = document.getElementById("message");
+
+    if (!message) return;
+
+    message.innerHTML = `<div class="success-box" style="display:block;margin-bottom:12px;">${text}</div>`;
+    window.setTimeout(() => {
+        message.innerHTML = "";
+    }, 1800);
+}
+
+function saveTopologyLayout(showMessage = true, locked = true) {
+    const store = readLayoutStore();
+
+    if (!locked && store.locked) {
+        return;
+    }
+
     const positions = {};
 
     nodes.forEach(node => {
         positions[node.id] = { x: Math.round(node.x), y: Math.round(node.y) };
     });
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+    store.layouts[topologyView] = positions;
+    store.locked = Boolean(locked || store.locked);
+    writeLayoutStore(store);
 
     if (showMessage) {
-        const message = document.getElementById("message");
-        if (message) {
-            message.innerHTML = '<div class="success-box" style="display:block;margin-bottom:12px;">Da luu vi tri topo.</div>';
-            window.setTimeout(() => {
-                message.innerHTML = "";
-            }, 1800);
-        }
+        showTopologyMessage(locked ? "Đã lưu topo." : "Đã lưu nháp vị trí topo.");
     }
 }
 
 function applySavedLayout() {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const store = readLayoutStore();
+    const saved = store.layouts[topologyView] || {};
 
-    if (!raw) return;
-
-    try {
-        const saved = JSON.parse(raw);
-
-        nodes = nodes.map(node => {
-            return saved[node.id]
-                ? { ...node, x: saved[node.id].x, y: saved[node.id].y }
-                : node;
-        });
-    } catch (error) {
-        localStorage.removeItem(STORAGE_KEY);
-    }
+    nodes = nodes.map(node => {
+        return saved[node.id]
+            ? { ...node, x: saved[node.id].x, y: saved[node.id].y }
+            : node;
+    });
 }
 
 function resetLayout() {
-    localStorage.removeItem(STORAGE_KEY);
+    const store = readLayoutStore();
+
+    delete store.layouts[topologyView];
+    store.locked = false;
+    writeLayoutStore(store);
+
     buildTopology(topologyLines);
     renderTopology();
     requestAnimationFrame(() => focusZone("all"));
