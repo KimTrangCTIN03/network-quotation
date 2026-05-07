@@ -16,6 +16,7 @@ OPTIONS = [
     ("opt2", "Option 2 - Mid Range"),
     ("opt3", "Option 3 - High End"),
 ]
+DC_SDN_OPTION = ("dc_sdn", "DC-SDN BOM")
 
 DETAIL_BOM_SHEETS = [
     "C8000",
@@ -96,6 +97,19 @@ def infer_component_type(part_number: Any, line_number: Any = "") -> str:
         return "Accessory"
 
     return "Component"
+
+
+def is_ficer_bom_row(row: Dict[str, Any]) -> bool:
+    values = [
+        row.get("part_number", ""),
+        row.get("selected_model", ""),
+        row.get("description", ""),
+    ]
+    return any("ficer" in str(value or "").lower() for value in values)
+
+
+def is_ficer_model(model: Any) -> bool:
+    return "ficer" in str(model or "").lower()
 
 
 def normalized_candidates(model: str) -> List[str]:
@@ -266,6 +280,63 @@ def find_part_rows(
     return parts
 
 
+def find_selected_rows_from_block(
+    workbooks: List[Any],
+    bundle_model: str,
+    include_models: List[str],
+    selected_model: str,
+    quote_quantity: float,
+    option_key: str,
+    line: Dict[str, Any],
+    component_type: str,
+) -> List[Dict[str, Any]]:
+    bundle_candidates = set(normalized_candidates(bundle_model))
+    include_candidates = {normalize_model(model) for model in include_models}
+
+    for wb in workbooks:
+        for sheet_name in DETAIL_BOM_SHEETS:
+            if sheet_name not in wb.sheetnames:
+                continue
+
+            ws = wb[sheet_name]
+
+            for row in range(2, ws.max_row + 1):
+                line_number = cell_value(wb, ws, row, 1)
+                part_number = cell_value(wb, ws, row, 2)
+
+                if not is_integer_line_number(line_number) or normalize_model(part_number) not in bundle_candidates:
+                    continue
+
+                parts = []
+                seen = set()
+
+                for part_row in range(row, ws.max_row + 1):
+                    if part_row != row:
+                        next_line_number = cell_value(wb, ws, part_row, 1)
+                        next_part_number = cell_value(wb, ws, part_row, 2)
+
+                        if is_integer_line_number(next_line_number) and next_part_number:
+                            break
+
+                    subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
+                    if subtotal_label == "subtotal":
+                        break
+
+                    part_key = normalize_model(cell_value(wb, ws, part_row, 2))
+                    if part_row != row:
+                        if part_key not in include_candidates or part_key in seen:
+                            continue
+                        seen.add(part_key)
+
+                    part = row_to_bom_part(wb, ws, part_row, selected_model, quote_quantity, option_key, line, component_type)
+                    if part:
+                        parts.append(part)
+
+                return parts
+
+    return []
+
+
 def find_bundle_parts(
     workbooks: List[Any],
     selected_model: str,
@@ -358,7 +429,6 @@ def add_mapped_components(
     if source_sheet == "AP_input":
         if model.startswith("CW917"):
             extras.extend(find_part_block(workbooks, INDOOR_AP_POWER_INJECTOR, selected_model, quote_quantity, option_key, line, "Accessory"))
-            extras.extend(find_part_block(workbooks, WIFI7_LICENSE_BUNDLE, selected_model, quote_quantity, option_key, line, "License", 1 / 5))
         elif model.startswith("C9124") or model == "CW9163E":
             for part_number in OUTDOOR_AP_ACCESSORIES:
                 component_type = "Bracket/Mount" if "MNT" in part_number else "Accessory"
@@ -375,6 +445,33 @@ def add_mapped_components(
             extras.extend(find_part_rows(workbooks, part_number, selected_model, quote_quantity, option_key, line, "License"))
 
     return extras
+
+
+def add_separate_component_blocks(
+    workbooks: List[Any],
+    selected_model: str,
+    quote_quantity: float,
+    option_key: str,
+    line: Dict[str, Any],
+) -> List[List[Dict[str, Any]]]:
+    model = selected_base_model(selected_model)
+    blocks: List[List[Dict[str, Any]]] = []
+
+    if model.startswith("CW917"):
+        license_block = find_selected_rows_from_block(
+            workbooks,
+            WIFI7_LICENSE_BUNDLE,
+            ["LIC-CW-A"],
+            selected_model,
+            quote_quantity,
+            option_key,
+            line,
+            "License",
+        )
+        if license_block:
+            blocks.append(license_block)
+
+    return blocks
 
 
 def load_detail_bom_workbooks() -> List[Any]:
@@ -599,7 +696,18 @@ def renumber_part_rows(rows: List[Dict[str, Any]], block_number: int) -> List[Di
     return result
 
 
-def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
+def renumber_separate_block_rows(rows: List[Dict[str, Any]], block_number: int) -> List[Dict[str, Any]]:
+    result = []
+
+    for index, row in enumerate(rows):
+        item = dict(row)
+        item["line_number"] = f"{block_number}.0" if index == 0 else f"{block_number}.{index}"
+        result.append(item)
+
+    return result
+
+
+def build_bom(quote_data: Dict[str, Any], group_filter: str | None = None) -> Dict[str, Any]:
     quote = quote_data.get("quote", quote_data)
     quote_lines = quote.get("quote_lines", [])
     workbooks = load_detail_bom_workbooks()
@@ -634,6 +742,13 @@ def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
             rows.extend(parts)
             rows.append(subtotal_row(option_key, group, parts))
 
+            separate_blocks = add_separate_component_blocks(workbooks, model, quote_quantity, option_key, line)
+            for separate_parts in separate_blocks:
+                separate_parts = renumber_separate_block_rows(separate_parts, block_number)
+                block_number += 1
+                rows.extend(separate_parts)
+                rows.append(subtotal_row(option_key, group, separate_parts))
+
         total = sum(
             to_float(row.get("extended_selling_price"), 0)
             for row in rows
@@ -656,6 +771,126 @@ def build_bom(quote_data: Dict[str, Any]) -> Dict[str, Any]:
             "label": option_label,
             "total": total,
             "line_count": line_count,
+        }
+
+    return result
+
+
+def build_bom_option(
+    workbooks: List[Any],
+    quote_lines: List[Dict[str, Any]],
+    selected_option_key: str,
+    output_option_key: str,
+    option_label: str,
+) -> Dict[str, Any]:
+    rows = []
+    current_group = None
+    block_number = 1
+
+    for line in quote_lines:
+        selected = (line.get("selected") or {}).get(selected_option_key) or {}
+        model = selected.get("model", "")
+        quote_quantity = to_float(line.get("quantity"), 0)
+
+        if not model or quote_quantity <= 0 or normalize_model(model) == "Check DC-SDN" or is_ficer_model(model):
+            continue
+
+        group = str(line.get("group") or "KhÃ¡c")
+
+        if group != current_group:
+            rows.append(group_header_row(output_option_key, group))
+            current_group = group
+
+        parts = find_bundle_parts(workbooks, model, quote_quantity, output_option_key, line)
+
+        if not parts:
+            parts = [fallback_selected_device_row(selected, quote_quantity, output_option_key, line)]
+
+        parts = [part for part in parts if not is_ficer_bom_row(part)]
+        if not parts:
+            continue
+
+        parts = renumber_part_rows(parts, block_number)
+        block_number += 1
+        rows.extend(parts)
+        rows.append(subtotal_row(output_option_key, group, parts))
+
+        separate_blocks = add_separate_component_blocks(workbooks, model, quote_quantity, output_option_key, line)
+        for separate_parts in separate_blocks:
+            separate_parts = [part for part in separate_parts if not is_ficer_bom_row(part)]
+            if not separate_parts:
+                continue
+
+            separate_parts = renumber_separate_block_rows(separate_parts, block_number)
+            block_number += 1
+            rows.extend(separate_parts)
+            rows.append(subtotal_row(output_option_key, group, separate_parts))
+
+    total = sum(
+        to_float(row.get("extended_selling_price"), 0)
+        for row in rows
+        if not row.get("is_group_header") and not row.get("is_subtotal") and not row.get("is_estimate_total")
+    )
+    line_count = sum(
+        1
+        for row in rows
+        if not row.get("is_group_header") and not row.get("is_subtotal") and not row.get("is_estimate_total")
+    )
+    rows.append(estimate_total_row(output_option_key, total))
+
+    return {
+        "label": option_label,
+        "rows": rows,
+        "total": total,
+        "line_count": line_count,
+    }
+
+
+def build_bom(quote_data: Dict[str, Any], group_filter: str | None = None) -> Dict[str, Any]:
+    quote = quote_data.get("quote", quote_data)
+    quote_lines = quote.get("quote_lines", [])
+    workbooks = load_detail_bom_workbooks()
+    result: Dict[str, Any] = {"options": {}, "summary": {}}
+
+    system_lines = [
+        line
+        for line in quote_lines
+        if str(line.get("group") or "").strip().lower() != "dc-sdn"
+    ]
+    dc_sdn_lines = [
+        line
+        for line in quote_lines
+        if str(line.get("group") or "").strip().lower() == "dc-sdn"
+    ]
+    group_filter_text = str(group_filter or "").strip().lower()
+
+    if group_filter_text and group_filter_text != "dc-sdn":
+        system_lines = [
+            line
+            for line in system_lines
+            if str(line.get("group") or "").strip().lower() == group_filter_text
+        ]
+        dc_sdn_lines = []
+    elif group_filter_text == "dc-sdn":
+        system_lines = []
+
+    for option_key, option_label in OPTIONS:
+        option = build_bom_option(workbooks, system_lines, option_key, option_key, option_label)
+        result["options"][option_key] = option
+        result["summary"][option_key] = {
+            "label": option["label"],
+            "total": option["total"],
+            "line_count": option["line_count"],
+        }
+
+    if dc_sdn_lines:
+        dc_key, dc_label = DC_SDN_OPTION
+        option = build_bom_option(workbooks, dc_sdn_lines, "opt1", dc_key, dc_label)
+        result["options"][dc_key] = option
+        result["summary"][dc_key] = {
+            "label": option["label"],
+            "total": option["total"],
+            "line_count": option["line_count"],
         }
 
     return result
@@ -813,19 +1048,23 @@ def write_rows_sheet(wb, title: str, rows: List[Dict[str, Any]]) -> None:
     ws.freeze_panes = "A2"
 
 
-def build_bom_excel(quote_data: Dict[str, Any], option_key: str | None = None) -> BytesIO:
-    bom = build_bom(quote_data)
+def build_bom_excel(quote_data: Dict[str, Any], option_key: str | None = None, group_filter: str | None = None) -> BytesIO:
+    bom = build_bom(quote_data, group_filter)
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
+    available_options = [
+        (key, option.get("label", key))
+        for key, option in bom.get("options", {}).items()
+    ]
     selected_options = [
         (key, label)
-        for key, label in OPTIONS
+        for key, label in available_options
         if option_key is None or key == option_key
     ]
 
     if not selected_options:
-        selected_options = OPTIONS
+        selected_options = available_options
 
     for selected_key, option_label in selected_options:
         option = bom["options"][selected_key]

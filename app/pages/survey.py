@@ -1,7 +1,7 @@
 from app.pages.styles import BASE_STYLE, render_nav
 
 
-def render_survey_page():
+def render_survey_page(user=None):
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -122,7 +122,7 @@ def render_survey_page():
     </style>
 </head>
 <body>
-{render_nav("survey")}
+{render_nav("survey", user)}
 <div class="container">
     <h1>Network Quotation Tool</h1>
     <div class="subtitle"></div>
@@ -200,7 +200,49 @@ def render_survey_page():
             </div>
         </div>
 
-        <div class="section-title">4. Thông tin từng WAN site</div>
+        <div class="section-title">4. Chi tiết DC-SDN</div>
+        <div class="checkbox-row">
+            <input type="checkbox" id="dc_sdn_enabled" onchange="toggleDcSdn()" />
+            <span>Có DC-SDN</span>
+        </div>
+
+        <div id="dc_sdn_fields" style="display:none;">
+            <div class="grid-2">
+                <div>
+                    <label>Số rack DC-SDN</label>
+                    <input type="number" id="dc_sdn_racks" value="2" />
+                </div>
+                <div>
+                    <label>Số server / rack DC-SDN</label>
+                    <input type="number" id="dc_sdn_servers_per_rack" value="10" />
+                </div>
+            </div>
+
+            <div class="grid-2" style="margin-top:12px;">
+                <div>
+                    <label>Số cổng 100GE / server</label>
+                    <input type="number" id="dc_sdn_100g" value="1" />
+                </div>
+                <div>
+                    <label>Số cổng 10GE SFP / server</label>
+                    <input type="number" id="dc_sdn_10g_sfp" value="0" />
+                </div>
+                <div>
+                    <label>Số cổng 10GE RJ45 / server</label>
+                    <input type="number" id="dc_sdn_10g_rj45" value="0" />
+                </div>
+                <div>
+                    <label>Số cổng 1GE SFP / server</label>
+                    <input type="number" id="dc_sdn_1g_sfp" value="0" />
+                </div>
+                <div>
+                    <label>Số cổng 1GE RJ45 / server</label>
+                    <input type="number" id="dc_sdn_1g_rj45" value="0" />
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">5. Thông tin từng WAN site</div>
         <div class="actions" style="margin-top:0;">
             <button class="btn btn-secondary" type="button" onclick="openWanDialog(0)">Nhập / sửa thông tin WAN</button>
         </div>
@@ -594,6 +636,11 @@ function toggleServerFarm() {{
     document.getElementById("server_farm_fields").style.display = enabled ? "block" : "none";
 }}
 
+function toggleDcSdn() {{
+    const enabled = document.getElementById("dc_sdn_enabled").checked;
+    document.getElementById("dc_sdn_fields").style.display = enabled ? "block" : "none";
+}}
+
 function getBuildings() {{
     return surveyBuildings.map(building => ({{ ...building }}));
 }}
@@ -614,6 +661,7 @@ function buildPayload() {{
     resizeBuildings();
     resizeWans();
     const serverFarmEnabled = document.getElementById("sf_enabled").checked;
+    const dcSdnEnabled = document.getElementById("dc_sdn_enabled").checked;
 
     return {{
         hq: {{
@@ -633,6 +681,16 @@ function buildPayload() {{
             port_1g_sfp_per_server: numberValue("sf_1g_sfp", 0),
             port_1g_rj45_per_server: numberValue("sf_1g_rj45", 0)
         }},
+        dc_sdn: {{
+            enabled: dcSdnEnabled,
+            racks: numberValue("dc_sdn_racks", 0),
+            servers_per_rack: numberValue("dc_sdn_servers_per_rack", 0),
+            port_100g_per_server: numberValue("dc_sdn_100g", 0),
+            port_10g_sfp_per_server: numberValue("dc_sdn_10g_sfp", 0),
+            port_10g_rj45_per_server: numberValue("dc_sdn_10g_rj45", 0),
+            port_1g_sfp_per_server: numberValue("dc_sdn_1g_sfp", 0),
+            port_1g_rj45_per_server: numberValue("dc_sdn_1g_rj45", 0)
+        }},
         wan_sites: getWans()
     }};
 }}
@@ -640,6 +698,7 @@ function buildPayload() {{
 function fillSurvey(payload) {{
     const hq = payload.hq || {{}};
     const serverFarm = payload.server_farm || {{}};
+    const dcSdn = payload.dc_sdn || {{}};
 
     document.getElementById("hq_users").value = hq.users ?? 1000;
     document.getElementById("hq_outdoor_wifi").checked = hq.has_outdoor_wifi !== false;
@@ -655,6 +714,16 @@ function fillSurvey(payload) {{
     document.getElementById("sf_10g_rj45").value = serverFarm.port_10g_rj45_per_server ?? 1;
     document.getElementById("sf_1g_sfp").value = serverFarm.port_1g_sfp_per_server ?? 1;
     document.getElementById("sf_1g_rj45").value = serverFarm.port_1g_rj45_per_server ?? 2;
+
+    document.getElementById("dc_sdn_enabled").checked = dcSdn.enabled === true || dcSdn.enabled === "Y";
+    toggleDcSdn();
+    document.getElementById("dc_sdn_racks").value = dcSdn.racks ?? 2;
+    document.getElementById("dc_sdn_servers_per_rack").value = dcSdn.servers_per_rack ?? 10;
+    document.getElementById("dc_sdn_100g").value = dcSdn.port_100g_per_server ?? 1;
+    document.getElementById("dc_sdn_10g_sfp").value = dcSdn.port_10g_sfp_per_server ?? 0;
+    document.getElementById("dc_sdn_10g_rj45").value = dcSdn.port_10g_rj45_per_server ?? 0;
+    document.getElementById("dc_sdn_1g_sfp").value = dcSdn.port_1g_sfp_per_server ?? 0;
+    document.getElementById("dc_sdn_1g_rj45").value = dcSdn.port_1g_rj45_per_server ?? 0;
 
     surveyBuildings = (payload.buildings || []).map(building => ({{ ...building }}));
     surveyWans = (payload.wan_sites || []).map(wan => ({{ ...wan }}));
@@ -722,6 +791,16 @@ function loadSample() {{
             port_10g_rj45_per_server: 1,
             port_1g_sfp_per_server: 1,
             port_1g_rj45_per_server: 2
+        }},
+        dc_sdn: {{
+            enabled: true,
+            racks: 2,
+            servers_per_rack: 10,
+            port_100g_per_server: 1,
+            port_10g_sfp_per_server: 1,
+            port_10g_rj45_per_server: 1,
+            port_1g_sfp_per_server: 0,
+            port_1g_rj45_per_server: 0
         }},
         wan_sites: [
             {{

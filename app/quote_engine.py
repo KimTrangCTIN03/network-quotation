@@ -1,16 +1,53 @@
 from typing import Any, Dict, List
 
 
+def line_quantity(line: Dict[str, Any]) -> int:
+    try:
+        return int(float(line.get("quantity", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def selected_amount(line: Dict[str, Any], opt: str) -> float:
+    quantity = line_quantity(line)
+    if quantity <= 0:
+        return 0
+
+    selected = (line.get("selected") or {}).get(opt) or {}
+    return quantity * float(selected.get("price") or 0)
+
+
+def choice_sort_key(choice: Dict[str, Any]) -> tuple:
+    model = str(choice.get("model") or "")
+    price = float(choice.get("price") or 0)
+
+    if model.strip().lower() == "check dc-sdn":
+        return (0, 0, model)
+
+    if price > 0:
+        return (1, price, model)
+
+    return (2, price, model)
+
+
+def sort_choices_by_price(choices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(choices, key=choice_sort_key)
+
+
 def default_select_first(recommended_lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     quote_lines = []
 
     for line in recommended_lines:
-        quantity = int(line.get("quantity", 0))
+        quantity = line_quantity(line)
+        options = {
+            opt: sort_choices_by_price(line.get("options", {}).get(opt, []))
+            for opt in ["opt1", "opt2", "opt3"]
+        }
 
         selected = {}
 
         for opt in ["opt1", "opt2", "opt3"]:
-            choices = line.get("options", {}).get(opt, [])
+            choices = options.get(opt, [])
 
             if choices:
                 selected[opt] = choices[0]
@@ -28,11 +65,11 @@ def default_select_first(recommended_lines: List[Dict[str, Any]]) -> List[Dict[s
             "quantity": quantity,
             "selected": selected,
             "amount": {
-                "opt1": quantity * float(selected["opt1"]["price"] or 0),
-                "opt2": quantity * float(selected["opt2"]["price"] or 0),
-                "opt3": quantity * float(selected["opt3"]["price"] or 0),
+                "opt1": 0 if quantity <= 0 else quantity * float(selected["opt1"]["price"] or 0),
+                "opt2": 0 if quantity <= 0 else quantity * float(selected["opt2"]["price"] or 0),
+                "opt3": 0 if quantity <= 0 else quantity * float(selected["opt3"]["price"] or 0),
             },
-            "options": line.get("options", {})
+            "options": options
         })
 
     return quote_lines
@@ -58,7 +95,8 @@ def summarize_quote(quote_lines: List[Dict[str, Any]]) -> Dict[str, Any]:
             }
 
         for opt in ["opt1", "opt2", "opt3"]:
-            amount = float(line["amount"][opt] or 0)
+            amount = selected_amount(line, opt)
+            line.setdefault("amount", {})[opt] = amount
             totals[opt] += amount
             group_totals[group][opt] += amount
 

@@ -1,7 +1,7 @@
 from app.pages.styles import BASE_STYLE, render_nav
 
 
-def render_bom_page():
+def render_bom_page(user=None):
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -12,15 +12,24 @@ def render_bom_page():
     <style>
         .bom-summary {{
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
             margin-bottom: 16px;
         }}
         .bom-metric {{
             background: #f8fafc;
             border: 1px solid #dbe3ef;
             border-radius: 12px;
-            padding: 14px;
+            padding: 18px;
+            min-height: 122px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }}
+
+        .bom-metric.dc-sdn-metric {{
+            background: linear-gradient(135deg, #fff7ed 0%, #ffffff 72%);
+            border-color: #fed7aa;
         }}
 
         .bom-metric .label {{
@@ -30,8 +39,35 @@ def render_bom_page():
 
         .bom-metric .value {{
             margin-top: 8px;
-            font-size: 26px;
+            font-size: 28px;
             font-weight: 800;
+            line-height: 1.15;
+        }}
+
+        .bom-toolbar {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }}
+
+        .bom-toolbar h3 {{
+            margin: 0;
+        }}
+
+        .cache-pill {{
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 12px;
+            font-weight: 700;
         }}
 
         .bom-tabs {{
@@ -159,10 +195,22 @@ def render_bom_page():
             opacity: 0.65;
             cursor: not-allowed;
         }}
+
+        @media (max-width: 1180px) {{
+            .bom-summary {{
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }}
+        }}
+
+        @media (max-width: 640px) {{
+            .bom-summary {{
+                grid-template-columns: 1fr;
+            }}
+        }}
     </style>
 </head>
 <body>
-{render_nav("bom")}
+{render_nav("bom", user)}
 <div class="container">
     <h1>Xuất BOM</h1>
     <div id="bom_block"></div>
@@ -171,6 +219,8 @@ def render_bom_page():
 <script>
 let currentBom = null;
 let activeOption = "opt1";
+let bomLoadedFromCache = false;
+const BOM_CACHE_VERSION = "v2";
 
 function money(v) {{
     return "$" + Number(v || 0).toLocaleString(undefined, {{
@@ -187,6 +237,50 @@ function esc(value) {{
         .replaceAll('"', "&quot;");
 }}
 
+function quoteHash(raw) {{
+    let hash = 2166136261;
+    for (let i = 0; i < raw.length; i += 1) {{
+        hash ^= raw.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }}
+    return (hash >>> 0).toString(16);
+}}
+
+function bomCacheKey(raw) {{
+    return `bomData:${{BOM_CACHE_VERSION}}:${{quoteHash(raw || "")}}`;
+}}
+
+function clearOldBomCaches(activeKey) {{
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {{
+        const key = localStorage.key(i);
+        if (key && key.startsWith("bomData:") && key !== activeKey) {{
+            localStorage.removeItem(key);
+        }}
+    }}
+}}
+
+function readCachedBom(raw) {{
+    const key = bomCacheKey(raw);
+    try {{
+        const cached = JSON.parse(localStorage.getItem(key) || "null");
+        if (!cached || !cached.bom) return null;
+        return cached.bom;
+    }} catch (error) {{
+        localStorage.removeItem(key);
+        return null;
+    }}
+}}
+
+function writeCachedBom(raw, bom) {{
+    const key = bomCacheKey(raw);
+    try {{
+        localStorage.setItem(key, JSON.stringify({{ bom, saved_at: new Date().toISOString() }}));
+        clearOldBomCaches(key);
+    }} catch (error) {{
+        clearOldBomCaches(key);
+    }}
+}}
+
 function showBomLoading(message, subMessage) {{
     document.getElementById("bom_block").innerHTML = `
         <div class="bom-loading-card">
@@ -199,18 +293,29 @@ function showBomLoading(message, subMessage) {{
     `;
 }}
 
-async function loadBom() {{
+async function loadBom(forceRefresh = false) {{
     const raw = localStorage.getItem("quoteData");
 
     if (!raw) {{
         document.getElementById("bom_block").innerHTML = `
             <div class="card">
-                <div class="empty-state">Chưa có dữ liệu báo giá để xuất BOM.</div>
+                <div class="empty-state">Chua co du lieu bao gia de xuat BOM.</div>
             </div>
         `;
         return;
     }}
 
+    if (!forceRefresh) {{
+        const cachedBom = readCachedBom(raw);
+        if (cachedBom) {{
+            currentBom = cachedBom;
+            bomLoadedFromCache = true;
+            renderBom();
+            return;
+        }}
+    }}
+
+    bomLoadedFromCache = false;
     showBomLoading("Đang xuất BOM, vui lòng đợi...", "Hệ thống đang tạo bảng BOM từ dữ liệu báo giá.");
 
     try {{
@@ -224,23 +329,23 @@ async function loadBom() {{
             const text = await res.text();
             document.getElementById("bom_block").innerHTML = `
                 <div class="card">
-                    <div class="error-box" style="display:block;">Không tạo được BOM: ${{esc(text)}}</div>
+                    <div class="error-box" style="display:block;">Khong tao duoc BOM: ${{esc(text)}}</div>
                 </div>
             `;
             return;
         }}
 
         currentBom = await res.json();
+        writeCachedBom(raw, currentBom);
         renderBom();
     }} catch (error) {{
         document.getElementById("bom_block").innerHTML = `
             <div class="card">
-                <div class="error-box" style="display:block;">Không tạo được BOM. Vui lòng thử lại.</div>
+                <div class="error-box" style="display:block;">Khong tao duoc BOM. Vui long thu lai.</div>
             </div>
         `;
     }}
 }}
-
 function setOption(optionKey) {{
     activeOption = optionKey;
     renderBom();
@@ -248,11 +353,12 @@ function setOption(optionKey) {{
 
 function renderSummary() {{
     const summary = currentBom.summary || {{}};
+    const optionKeys = Object.keys(summary);
 
     return `
         <div class="bom-summary">
-            ${{["opt1", "opt2", "opt3"].map(opt => `
-                <div class="bom-metric">
+            ${{optionKeys.map(opt => `
+                <div class="bom-metric ${{opt === "dc_sdn" ? "dc-sdn-metric" : ""}}">
                     <div class="label">${{esc(summary[opt]?.label || opt)}}</div>
                     <div class="value">${{money(summary[opt]?.total || 0)}}</div>
                 </div>
@@ -339,17 +445,24 @@ function renderRows(rows) {{
 
 function renderBom() {{
     const options = currentBom.options || {{}};
+    const optionKeys = Object.keys(options);
+    if (!options[activeOption] && optionKeys.length) {{
+        activeOption = optionKeys[0];
+    }}
     const option = options[activeOption] || {{ rows: [], total: 0, label: activeOption }};
 
     document.getElementById("bom_block").innerHTML = `
         <div class="group-summary-card">
-            <h3>Tổng quan BOM</h3>
+            <div class="bom-toolbar">
+                <h3>Tổng quan BOM</h3>
+                
+            </div>
             ${{renderSummary()}}
         </div>
 
         <div class="group-summary-card">
             <div class="bom-tabs">
-                ${{["opt1", "opt2", "opt3"].map(opt => `
+                ${{optionKeys.map(opt => `
                     <button class="bom-tab ${{activeOption === opt ? "active" : ""}}" type="button" onclick="setOption('${{opt}}')">
                         ${{esc(options[opt]?.label || opt)}}
                     </button>

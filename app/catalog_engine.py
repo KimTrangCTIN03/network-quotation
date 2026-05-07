@@ -21,6 +21,7 @@ SOURCE_BOM_SHEETS = [
     "C9300",
     "C1300",
     "C9500",
+    "ModularSwitch",
     "ACI",
     "ISR1000",
     "C8000_secure",
@@ -34,6 +35,7 @@ SOURCE_BOM_FILES = [
     "C9300.xlsx",
     "C1300.xlsx",
     "C9500.xlsx",
+    "ModularSwitch.xlsx",
     "ACI.xlsx",
     "ISR1000.xlsx",
     "C8000_secure.xlsx",
@@ -239,6 +241,30 @@ def read_price_overrides() -> Dict[str, float]:
     return result
 
 
+def read_3rd_sfp_price_map() -> Dict[str, float]:
+    result: Dict[str, float] = {}
+
+    if not sheet_exists(SPECS_FILE, "3rdSFP"):
+        return result
+
+    wb = openpyxl.load_workbook(SPECS_FILE, data_only=False)
+    ws = wb["3rdSFP"]
+
+    for row in range(2, ws.max_row + 1):
+        model = normalize_model(cell_value(wb, ws, row, 1))
+        list_price = to_float(cell_value(wb, ws, row, 2), 0)
+        am_price = to_float(cell_value(wb, ws, row, 3), 0)
+        final_price = to_float(cell_value(wb, ws, row, 4), 0)
+
+        if final_price <= 0:
+            final_price = am_price if am_price > 0 else list_price
+
+        if model and final_price > 0:
+            result[model] = final_price
+
+    return result
+
+
 def save_price_overrides(prices: Dict[str, float]) -> None:
     DATA_DIR.mkdir(exist_ok=True)
     normalized = {
@@ -320,6 +346,7 @@ def read_price_map_from_bom_files() -> Dict[str, float]:
         else:
             read_subtotal_bundle_prices(wb, ws, result)
 
+    result.update(read_3rd_sfp_price_map())
     return result
 
 
@@ -590,6 +617,10 @@ def infer_sfp_speed(model: str, description: str = "") -> float:
 def infer_sfp_distance(model: str, description: str = "") -> float:
     text = f"{model} {description}".upper()
 
+    explicit_km = re.search(r"(\d+(?:\.\d+)?)\s*KM", text)
+    if explicit_km:
+        return to_float(explicit_km.group(1), 0)
+
     if "80KM" in text or "ZR" in text:
         return 80
 
@@ -744,6 +775,7 @@ def load_catalogs() -> Dict[str, Any]:
         "routers": read_specs_matrix_sheet("Router"),
         "switches": read_specs_matrix_sheet("SwitchCampus"),
         "modular_switches": read_specs_matrix_sheet("ModularSwitch"),
+        "nexus_switches": read_specs_matrix_sheet("NexusSwitch"),
         "wifi": read_specs_matrix_sheet("WiFi"),
         "sfps": read_sfp_catalog(),
     }
@@ -757,6 +789,7 @@ def debug_catalog_summary() -> Dict[str, Any]:
         "router_count": len(catalogs["routers"]),
         "switch_count": len(catalogs["switches"]),
         "modular_switch_count": len(catalogs["modular_switches"]),
+        "nexus_switch_count": len(catalogs["nexus_switches"]),
         "wifi_count": len(catalogs["wifi"]),
         "sfp_count": len(catalogs["sfps"]),
         "sample_prices": list(catalogs["prices"].items())[:10],

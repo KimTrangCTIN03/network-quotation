@@ -1,7 +1,11 @@
 from app.pages.styles import BASE_STYLE, render_nav
 
 
-def render_pricing_page():
+def render_pricing_page(user=None):
+    is_admin = bool(user and user.get("role") == "admin")
+    list_price_disabled = "" if is_admin else "disabled"
+    admin_tools_style = "" if is_admin else "display:none;"
+    user_note_style = "display:none;" if is_admin else ""
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -106,7 +110,7 @@ def render_pricing_page():
     </style>
 </head>
 <body>
-{render_nav("pricing")}
+{render_nav("pricing", user)}
 <div class="container">
     <div class="topbar">
         <div>
@@ -146,7 +150,7 @@ def render_pricing_page():
                 <input id="amModel" type="text" placeholder="C8200L-1N-4T" />
                 <div style="height:10px;"></div>
                 <label>List Price ($)</label>
-                <input id="listPrice" type="number" placeholder="26000" />
+                <input id="listPrice" type="number" placeholder="26000" {list_price_disabled} />
                 <div style="height:10px;"></div>
                 <label>Giá AM ($)</label>
                 <input id="amPrice" type="number" placeholder="18000" />
@@ -158,7 +162,7 @@ def render_pricing_page():
                 <div id="errorBox" class="error-box"></div>
             </div>
 
-            <div class="card">
+            <div class="card" style="{admin_tools_style}">
                 <div class="section-title" style="margin-top:0;">Import giá từ BOM</div>
                 <label>Hãng</label>
                 <input id="importVendor" type="text" placeholder="Cisco, Juniper, ..." value="Cisco" />
@@ -170,12 +174,14 @@ def render_pricing_page():
                 </div>
                 <div class="small">File import có 3 cột: Device, List Price và AM Price</div>
             </div>
+            
         </div>
     </div>
 </div>
 
 <script>
 let searchTimer = null;
+const IS_ADMIN = {str(is_admin).lower()};
 
 function money(v) {{
     return "$" + Number(v || 0).toLocaleString(undefined, {{
@@ -277,7 +283,7 @@ async function saveAmPrice() {{
     clearMessage();
     const vendor = document.getElementById("amVendor").value.trim() || "Cisco";
     const model = document.getElementById("amModel").value.trim();
-    const list_price = Number(document.getElementById("listPrice").value || 0);
+    const list_price = IS_ADMIN ? Number(document.getElementById("listPrice").value || 0) : null;
     const price = Number(document.getElementById("amPrice").value || 0);
 
     const res = await fetch("/api/prices/am", {{

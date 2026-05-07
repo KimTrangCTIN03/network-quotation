@@ -92,6 +92,88 @@ def ensure_schema(conn: Any) -> None:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_users (
+                id BIGSERIAL PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                full_name TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                department TEXT NOT NULL DEFAULT '',
+                phone TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'user',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                token TEXT PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+                username TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL DEFAULT '',
+                entity_id TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quote_records (
+                id BIGSERIAL PRIMARY KEY,
+                owner_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+                owner_username TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft',
+                quote_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vendors (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        for column_name in ["full_name", "email", "department", "phone"]:
+            cur.execute(
+                f"""
+                ALTER TABLE app_users
+                ADD COLUMN IF NOT EXISTS {column_name} TEXT NOT NULL DEFAULT ''
+                """
+            )
 
     conn.commit()
 

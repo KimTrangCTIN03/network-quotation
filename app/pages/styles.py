@@ -328,13 +328,28 @@ BASE_STYLE = """
 """
 
 
-def render_nav(active: str = "") -> str:
+def esc_nav_label(value) -> str:
+    return (
+        str(value or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def render_nav(active: str = "", user: dict | None = None) -> str:
     solution_active = active in {"survey", "calculation", "topology", "quote", "bom"}
     items = [
         ("dashboard", "/dashboard", "Dashboard"),
         ("solution", "/survey", "Gi&#7843;i ph&#225;p"),
         ("pricing", "/pricing", "Catalog gi&#225;"),
     ]
+    if user and user.get("role") == "admin":
+        items.append(("admin", "/admin", "Admin"))
+    if user:
+        items.append(("account", "/account", esc_nav_label(user.get("full_name") or user.get("username") or "Tài khoản")))
+        items.append(("logout", "/logout", "Đăng xuất"))
     links = "".join(
         f'<a class="app-nav-link{" active" if key == active or (key == "solution" and solution_active) else ""}" href="{href}">{label}</a>'
         for key, href, label in items

@@ -252,11 +252,186 @@ def proposal_line(
     }
 
 
+def fixed_model_requirement(model: str) -> Dict[str, Any]:
+    return {"fixed_model": model}
+
+
+DC_SDN_DEFAULT_CAPACITY = {
+    "N9K-C9504": {"min_100g": 144},
+    "N9K-X9736C-FX3": {"min_100g": 36},
+    "N9K-C9316D-GX": {"min_100g": 16},
+    "N9K-C93240YC-FX2": {"min_10g_sfp": 48},
+    "N9K-C93180YC-FX3": {"min_1g_sfp": 48},
+    "N9K-C9348GC-FX3": {"min_1g_rj45": 48},
+    "N9K-C93108TC-FX3": {"min_1g_rj45": 48, "min_10g_rj45": 48},
+}
+
+
+def dc_sdn_requirement(role: str, default_model: str, **requirements: Any) -> Dict[str, Any]:
+    return {
+        **requirements,
+        "dc_sdn_role": role,
+        "default_model": default_model,
+        "selection_source": "DC-Calculation",
+    }
+
+
+def dc_model_capacity(model: str, key: str) -> float:
+    return float(DC_SDN_DEFAULT_CAPACITY.get(model, {}).get(key) or 0)
+
+
+def calculate_dc_sdn(dc_sdn: Dict[str, Any]) -> Dict[str, Any]:
+    enabled = to_bool(dc_sdn.get("enabled", False))
+    if not enabled:
+        return {"enabled": False, "requirements": [], "proposal_lines": []}
+
+    racks = int(dc_sdn.get("racks", 0))
+    servers_per_rack = int(dc_sdn.get("servers_per_rack", 0))
+    p100 = int(dc_sdn.get("port_100g_per_server", 0))
+    p10_sfp = int(dc_sdn.get("port_10g_sfp_per_server", 0))
+    p10_rj45 = int(dc_sdn.get("port_10g_rj45_per_server", 0))
+    p1_sfp = int(dc_sdn.get("port_1g_sfp_per_server", 0))
+    p1_rj45 = int(dc_sdn.get("port_1g_rj45_per_server", 0))
+
+    spine_qty = 2
+    leaf_100g_default = "N9K-C9316D-GX"
+    leaf_10g_sfp_default = "N9K-C93240YC-FX2"
+    leaf_1g_sfp_default = "N9K-C93180YC-FX3"
+    leaf_10g_rj45_default = "N9K-C93108TC-FX3"
+    leaf_1g_rj45_default = "N9K-C93108TC-FX3"
+    card_default = "N9K-X9736C-FX3"
+
+    # DC-SDN leaf sizing follows the survey labels directly.
+    leaf_100g_qty = racks * ceil_div(
+        servers_per_rack * p100,
+        dc_model_capacity(leaf_100g_default, "min_100g") - 2,
+    )
+    leaf_10g_sfp_qty = racks * ceil_div(
+        servers_per_rack * p10_sfp,
+        dc_model_capacity(leaf_10g_sfp_default, "min_10g_sfp"),
+    )
+    leaf_1g_sfp_qty = racks * ceil_div(
+        servers_per_rack * p1_sfp,
+        dc_model_capacity(leaf_1g_sfp_default, "min_1g_sfp"),
+    )
+    leaf_10g_rj45_qty = racks * ceil_div(
+        servers_per_rack * p10_rj45,
+        dc_model_capacity(leaf_10g_rj45_default, "min_10g_rj45"),
+    )
+    leaf_1g_rj45_qty = racks * ceil_div(
+        servers_per_rack * p1_rj45,
+        dc_model_capacity(leaf_1g_rj45_default, "min_1g_rj45"),
+    )
+    total_leaf_qty = leaf_100g_qty + leaf_10g_sfp_qty + leaf_10g_rj45_qty + leaf_1g_sfp_qty + leaf_1g_rj45_qty
+    spine_card_qty = spine_qty * ceil_div(total_leaf_qty, dc_model_capacity(card_default, "min_100g"))
+
+    proposal_lines = [
+        proposal_line("DC-SDN", "APIC Cluster", 1, fixed_model_requirement("APIC-CLUSTERG5")),
+        proposal_line("DC-SDN", "Spine", spine_qty, dc_sdn_requirement("spine", "N9K-C9504", min_100g=total_leaf_qty, model_prefix="N9K-C95", excel_range="DC-Calculation!B15:Z15")),
+        proposal_line("DC-SDN", "Card 100G cho Spine", spine_card_qty, dc_sdn_requirement("spine_card_100g", card_default, min_100g=2, model_contains="=", excel_range="DC-Calculation!B16:Z16")),
+        proposal_line("DC-SDN", "Leaf 100G", leaf_100g_qty, dc_sdn_requirement("leaf_100g", leaf_100g_default, min_100g=16, model_prefix="N9K-C93", excel_range="DC-Calculation!B17:Z17")),
+        proposal_line("DC-SDN", "Leaf 10G quang", leaf_10g_sfp_qty, dc_sdn_requirement("leaf_10g_sfp", leaf_10g_sfp_default, min_10g_sfp=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B18:Z18")),
+        proposal_line("DC-SDN", "Leaf 10G đồng", leaf_10g_rj45_qty, fixed_model_requirement("N9K-C93108TC-FX3")),
+        proposal_line("DC-SDN", "Leaf 1G quang", leaf_1g_sfp_qty, dc_sdn_requirement("leaf_1g_sfp", leaf_1g_sfp_default, min_1g_sfp=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B19:Z19")),
+        proposal_line("DC-SDN", "Leaf 1G đồng", leaf_1g_rj45_qty, fixed_model_requirement("N9K-C93108TC-FX3")),
+        proposal_line("DC-SDN", "SFP 100G kết nối Spine-Leaf", total_leaf_qty * 4, fixed_model_requirement("QSFP-100G-LR4-S")),
+        proposal_line("DC-SDN", "SFP 100G kết nối Server", racks * servers_per_rack * p100, fixed_model_requirement("QSFP-100G-LR-S")),
+        proposal_line("DC-SDN", "SFP 10G kết nối Server", racks * servers_per_rack * p10_sfp, fixed_model_requirement("SFP-10G-SR")),
+        proposal_line("DC-SDN", "SFP 1G kết nối Server", racks * servers_per_rack * p1_sfp, fixed_model_requirement("GLC-SX-MMD")),
+    ]
+
+    return {
+        "enabled": True,
+        "racks": racks,
+        "servers_per_rack": servers_per_rack,
+        "total_leaf_qty": total_leaf_qty,
+        "requirements": [line for line in proposal_lines if line["quantity"] > 0],
+        "proposal_lines": proposal_lines,
+    }
+
+
+def calculate_dc_sdn(dc_sdn: Dict[str, Any]) -> Dict[str, Any]:
+    enabled = to_bool(dc_sdn.get("enabled", False))
+    if not enabled:
+        return {"enabled": False, "requirements": [], "proposal_lines": []}
+
+    racks = int(dc_sdn.get("racks", 0))
+    servers_per_rack = int(dc_sdn.get("servers_per_rack", 0))
+    p100 = int(dc_sdn.get("port_100g_per_server", 0))
+    p10_sfp = int(dc_sdn.get("port_10g_sfp_per_server", 0))
+    p10_rj45 = int(dc_sdn.get("port_10g_rj45_per_server", 0))
+    p1_sfp = int(dc_sdn.get("port_1g_sfp_per_server", 0))
+    p1_rj45 = int(dc_sdn.get("port_1g_rj45_per_server", 0))
+
+    spine_qty = 2
+    leaf_100g_default = "N9K-C9316D-GX"
+    leaf_10g_sfp_default = "N9K-C93240YC-FX2"
+    leaf_1g_sfp_default = "N9K-C93180YC-FX3"
+    leaf_10g_rj45_default = "N9K-C93108TC-FX3"
+    leaf_1g_rj45_default = "N9K-C93108TC-FX3"
+    card_default = "N9K-X9736C-FX3"
+
+    # DC-SDN leaf sizing follows the survey labels directly.
+    leaf_100g_qty = racks * ceil_div(
+        servers_per_rack * p100,
+        dc_model_capacity(leaf_100g_default, "min_100g") - 2,
+    )
+    leaf_10g_sfp_qty = racks * ceil_div(
+        servers_per_rack * p10_sfp,
+        dc_model_capacity(leaf_10g_sfp_default, "min_10g_sfp"),
+    )
+    leaf_1g_sfp_qty = racks * ceil_div(
+        servers_per_rack * p1_sfp,
+        dc_model_capacity(leaf_1g_sfp_default, "min_1g_sfp"),
+    )
+    leaf_10g_rj45_qty = racks * ceil_div(
+        servers_per_rack * p10_rj45,
+        dc_model_capacity(leaf_10g_rj45_default, "min_10g_rj45"),
+    )
+    leaf_1g_rj45_qty = racks * ceil_div(
+        servers_per_rack * p1_rj45,
+        dc_model_capacity(leaf_1g_rj45_default, "min_1g_rj45"),
+    )
+    total_leaf_qty = leaf_100g_qty + leaf_10g_sfp_qty + leaf_1g_sfp_qty + leaf_10g_rj45_qty + leaf_1g_rj45_qty
+    spine_card_qty = spine_qty * ceil_div(total_leaf_qty, dc_model_capacity(card_default, "min_100g"))
+
+    proposal_lines = [
+        proposal_line("DC-SDN", "APIC Cluster", 1, fixed_model_requirement("APIC-CLUSTERG5")),
+        proposal_line("DC-SDN", "Spine", spine_qty, dc_sdn_requirement("spine", "N9K-C9504", min_100g=total_leaf_qty, model_prefix="N9K-C95", excel_range="DC-Calculation!B15:Z15")),
+        proposal_line("DC-SDN", "Card 100G cho Spine", spine_card_qty, dc_sdn_requirement("spine_card_100g", card_default, min_100g=2, model_contains="=", excel_range="DC-Calculation!B16:Z16")),
+        proposal_line("DC-SDN", "Leaf 100G", leaf_100g_qty, dc_sdn_requirement("leaf_100g", leaf_100g_default, min_100g=16, model_prefix="N9K-C93", excel_range="DC-Calculation!B17:Z17")),
+        proposal_line("DC-SDN", "Leaf 10G quang", leaf_10g_sfp_qty, dc_sdn_requirement("leaf_10g_sfp", leaf_10g_sfp_default, min_10g_sfp=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B18:Z18")),
+        proposal_line("DC-SDN", "Leaf 1G quang", leaf_1g_sfp_qty, dc_sdn_requirement("leaf_1g_sfp", leaf_1g_sfp_default, min_1g_sfp=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B19:Z19")),
+        proposal_line("DC-SDN", "Leaf 10G dong", leaf_10g_rj45_qty, dc_sdn_requirement("leaf_10g_rj45", leaf_10g_rj45_default, min_10g_rj45=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B20:Z20")),
+        proposal_line("DC-SDN", "Leaf 1G dong", leaf_1g_rj45_qty, dc_sdn_requirement("leaf_1g_rj45", leaf_1g_rj45_default, min_1g_rj45=48, model_prefix="N9K-C93", excel_range="DC-Calculation!B21:Z21")),
+        proposal_line("DC-SDN", "SFP 100G kết nối Spine-Leaf", total_leaf_qty * 4, dc_sdn_requirement("sfp_100g_spine_leaf", "QSFP-100G-LR4-S", speed=100, distance=10, excel_range="DC-Calculation!B24:Z28")),
+        proposal_line("DC-SDN", "SFP 100G kết nối Server", racks * servers_per_rack * p100, dc_sdn_requirement("sfp_100g_server", "QSFP-100G-LR-S", speed=100, distance=10, excel_range="DC-Calculation!B24:Z28")),
+        proposal_line("DC-SDN", "SFP 10G kết nối Server", racks * servers_per_rack * p10_sfp, dc_sdn_requirement("sfp_10g_server", "SFP-10G-SR", speed=10, distance=0.5, excel_range="DC-Calculation!B24:Z28")),
+        proposal_line("DC-SDN", "SFP 1G kết nối Server", racks * servers_per_rack * p1_sfp, dc_sdn_requirement("sfp_1g_server", "GLC-SX-MMD", speed=1, distance=0.5, excel_range="DC-Calculation!B24:Z28")),
+    ]
+
+    return {
+        "enabled": True,
+        "racks": racks,
+        "servers_per_rack": servers_per_rack,
+        "total_leaf_qty": total_leaf_qty,
+        "leaf_100g_qty": leaf_100g_qty,
+        "leaf_10g_sfp_qty": leaf_10g_sfp_qty,
+        "leaf_1g_sfp_qty": leaf_1g_sfp_qty,
+        "leaf_10g_rj45_qty": leaf_10g_rj45_qty,
+        "leaf_1g_rj45_qty": leaf_1g_rj45_qty,
+        "spine_card_qty": spine_card_qty,
+        "requirements": [line for line in proposal_lines if line["quantity"] > 0],
+        "proposal_lines": proposal_lines,
+    }
+
+
 def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
     hq = payload.get("hq", {})
     buildings = payload.get("buildings", [])
     server_farm = payload.get("server_farm", {})
     wan_sites = payload.get("wan_sites", [])
+    dc_sdn = payload.get("dc_sdn", {})
 
     hq_users = int(hq.get("users", 0))
     has_outdoor_wifi = to_bool(hq.get("has_outdoor_wifi", False))
@@ -336,6 +511,8 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     sf_bandwidth_gbps = 0
     sf_core_spine_qty = 0
+    sf_card_100g_qty = 0
+    sf_card_10g_qty = 0
     sf_leaf_100g_qty = 0
     sf_leaf_10g_sfp_qty = 0
     sf_leaf_10g_rj45_qty = 0
@@ -383,7 +560,7 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         # Logic theo Excel: có Server Farm và có server thì Core/Spine = 2.
-        if total_servers > 0:
+        if False:
             sf_core_spine_qty = 2
 
         if total_100g_ports > 0:
@@ -407,29 +584,61 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     campus_sfp_100g_qty = 8 if sf_bandwidth_gbps > 60 else 0
 
-    campus_sfp_10g_qty = 8 if (
-        gateway_demand >= 5000
-        or (0 < sf_bandwidth_gbps <= 60)
-    ) else 0
+    campus_sfp_10g_qty = (
+        (campus_gateway_router_qty * 4 + campus_firewall_qty * 4)
+        if gateway_demand >= 5000
+        else 0
+    ) + (8 if sf_bandwidth_gbps <= 60 else 0)
 
     # Campus SFP 1G:
     # Mỗi access switch có 2 uplink.
     # Mỗi uplink cần module quang ở 2 đầu nên nhân 4.
     # Cộng thêm 16 SFP cho phần Gateway / Firewall / Core.
-    campus_sfp_1g_qty = (total_access_switch * 4 + 16) if total_access_switch > 0 else 0
+    campus_sfp_1g_qty = (
+        (campus_gateway_router_qty * 4 + campus_firewall_qty * 4)
+        if gateway_demand < 5000
+        else 0
+    ) + total_access_switch * 4
+
+    campus_core_100g_card_qty = campus_core_modular_qty * (1 if campus_sfp_1g_qty > 0 else 0)
+    campus_core_10g_1g_card_qty = campus_core_modular_qty * ceil_div(
+        total_access_switch + campus_sfp_10g_qty / 4,
+        48,
+    )
 
     # Server Farm SFP:
     # Các cổng quang xuống server tính 2 đầu.
     # Uplink Server Farm sang Campus/Core tính thêm 8 SFP theo loại uplink.
-    server_farm_sfp_100g_qty = total_100g_ports * 2
-    if sf_bandwidth_gbps > 60:
-        server_farm_sfp_100g_qty += 8
+    server_farm_sfp_100g_qty = 0
+    server_farm_sfp_10g_qty = 0
+    server_farm_sfp_1g_qty = 0
 
-    server_farm_sfp_10g_qty = total_10g_sfp_ports * 2
-    if 0 < sf_bandwidth_gbps <= 60:
-        server_farm_sfp_10g_qty += 8
+    if sf_enabled:
+        server_farm_sfp_100g_qty = (
+            (8 if sf_bandwidth_gbps > 60 else 0)
+            + total_100g_ports
+            + (sf_leaf_100g_qty + sf_leaf_10g_sfp_qty + sf_leaf_10g_rj45_qty) * 4
+        )
+        server_farm_sfp_10g_qty = (
+            (8 if sf_bandwidth_gbps <= 60 else 0)
+            + total_10g_sfp_ports
+            + (sf_leaf_1g_sfp_qty + sf_leaf_1g_rj45_qty) * 4
+        )
+        server_farm_sfp_1g_qty = total_1g_sfp_ports
 
-    server_farm_sfp_1g_qty = total_1g_sfp_ports * 2
+    sf_leaf_total = (
+        sf_leaf_100g_qty
+        + sf_leaf_10g_sfp_qty
+        + sf_leaf_10g_rj45_qty
+        + sf_leaf_1g_sfp_qty
+        + sf_leaf_1g_rj45_qty
+    )
+
+    if sf_leaf_total >= 3:
+        sf_core_spine_qty = 2 if sf_leaf_total < 384 else 4
+
+    sf_card_100g_qty = sf_core_spine_qty * ceil_div(server_farm_sfp_100g_qty, 48)
+    sf_card_10g_qty = sf_core_spine_qty * ceil_div(server_farm_sfp_10g_qty, 160)
 
     # =========================
     # 4. WAN calculation
@@ -468,6 +677,16 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         "min_100g": 0,
     })
 
+    add_requirement("Campus - Trụ sở chính", "Card 100GE", campus_core_100g_card_qty, {
+        **fixed_model_requirement("C9400-LC-12QC"),
+        "parent_item": "Core Switch Modular",
+    })
+
+    add_requirement("Campus - Trụ sở chính", "Card 10GE/1GE", campus_core_10g_1g_card_qty, {
+        **fixed_model_requirement("C9400-LC-48XS"),
+        "parent_item": "Core Switch Modular",
+    })
+
     add_requirement("Campus - Trụ sở chính", "Core Switch 48 GE SFP", campus_core_48_qty, {
         "min_1g_sfp": 48,
     })
@@ -492,11 +711,22 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         "ap_type": "outdoor"
     })
 
+    add_requirement("Campus - Trụ sở chính", "Power Injector indoor", indoor_ap_total, fixed_model_requirement("AIR-PWRINJ7"))
+    add_requirement("Campus - Trụ sở chính", "Power Injector outdoor", outdoor_ap_total, fixed_model_requirement("IW-PWRINJ-60RGDMG"))
+
     add_requirement("Campus - Trụ sở chính", "SFP 100G", campus_sfp_100g_qty, {"speed": 100, "distance": 10})
     add_requirement("Campus - Trụ sở chính", "SFP 10G", campus_sfp_10g_qty, {"speed": 10, "distance": 10})
     add_requirement("Campus - Trụ sở chính", "SFP 1G", campus_sfp_1g_qty, {"speed": 1, "distance": 10})
 
     add_requirement("Server Farm", "Core Switch (hoặc Spine Switch)", sf_core_spine_qty, {"min_100g": 2})
+    add_requirement("Server Farm", "Card 100GE", sf_card_100g_qty, {
+        **fixed_model_requirement("C9400-LC-12QC"),
+        "parent_item": "Core Switch (hoặc Spine Switch)",
+    })
+    add_requirement("Server Farm", "Card 10GE", sf_card_10g_qty, {
+        **fixed_model_requirement("C9400-LC-48XS"),
+        "parent_item": "Core Switch (hoặc Spine Switch)",
+    })
     add_requirement("Server Farm", "Access Switch 100G (hoặc Leaf Switch)", sf_leaf_100g_qty, {"min_100g": 48})
     add_requirement("Server Farm", "Access Switch 48x10G SFP (hoặc Leaf Switch)", sf_leaf_10g_sfp_qty, {"min_10g_sfp": 48})
     add_requirement("Server Farm", "Access Switch 48x10G RJ45 (hoặc Leaf Switch)", sf_leaf_10g_rj45_qty, {"min_10g_rj45": 48})
@@ -529,6 +759,7 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         add_requirement("WAN", item, qty, {"min_1g_rj45": port})
 
     add_requirement("WAN", "Access Point indoor (kèm Power Injector)", wan_ap_total, {"ap_type": "indoor"})
+    add_requirement("WAN", "Power Injector indoor", wan_ap_total, fixed_model_requirement("AIR-PWRINJ7"))
     add_requirement("WAN", "SFP 1G", wan_sfp_1g_qty, {"speed": 1, "distance": 10})
 
     # =========================
@@ -549,6 +780,14 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         proposal_line("Campus - Trụ sở chính", "Core Switch Modular", campus_core_modular_qty, {
             "min_total_access_ports": total_access_switch,
             "min_100g": 0,
+        }),
+        proposal_line("Campus - Trụ sở chính", "Card 100GE", campus_core_100g_card_qty, {
+            **fixed_model_requirement("C9400-LC-12QC"),
+            "parent_item": "Core Switch Modular",
+        }),
+        proposal_line("Campus - Trụ sở chính", "Card 10GE/1GE", campus_core_10g_1g_card_qty, {
+            **fixed_model_requirement("C9400-LC-48XS"),
+            "parent_item": "Core Switch Modular",
         }),
         proposal_line("Campus - Trụ sở chính", "Core Switch 48 GE SFP", campus_core_48_qty, {
             "min_1g_sfp": 48,
@@ -574,6 +813,8 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         proposal_line("Campus - Trụ sở chính", "Access Point outdoor (kèm Power Injector)", outdoor_ap_total, {
             "ap_type": "outdoor",
         }),
+        proposal_line("Campus - Trụ sở chính", "Power Injector indoor", indoor_ap_total, fixed_model_requirement("AIR-PWRINJ7")),
+        proposal_line("Campus - Trụ sở chính", "Power Injector outdoor", outdoor_ap_total, fixed_model_requirement("IW-PWRINJ-60RGDMG")),
         proposal_line("Campus - Trụ sở chính", "SFP 100G", campus_sfp_100g_qty, {
             "speed": 100,
             "distance": 10,
@@ -589,6 +830,14 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         proposal_line("Server Farm", "Core Switch (hoặc Spine Switch)", sf_core_spine_qty, {
             "min_100g": 2,
+        }),
+        proposal_line("Server Farm", "Card 100GE", sf_card_100g_qty, {
+            **fixed_model_requirement("C9400-LC-12QC"),
+            "parent_item": "Core Switch (hoặc Spine Switch)",
+        }),
+        proposal_line("Server Farm", "Card 10GE", sf_card_10g_qty, {
+            **fixed_model_requirement("C9400-LC-48XS"),
+            "parent_item": "Core Switch (hoặc Spine Switch)",
         }),
         proposal_line("Server Farm", "Access Switch 100G (hoặc Leaf Switch)", sf_leaf_100g_qty, {
             "min_100g": 48,
@@ -645,19 +894,29 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         proposal_line("WAN", "Access Point indoor (kèm Power Injector)", wan_ap_total, {
             "ap_type": "indoor",
         }),
+        proposal_line("WAN", "Power Injector indoor", wan_ap_total, fixed_model_requirement("AIR-PWRINJ7")),
         proposal_line("WAN", "SFP 1G", wan_sfp_1g_qty, {
             "speed": 1,
             "distance": 10,
         }),
     ]
 
+    dc_sdn_calc = calculate_dc_sdn(dc_sdn)
+    requirements.extend(dc_sdn_calc["requirements"])
+    proposal_lines.extend(dc_sdn_calc["proposal_lines"])
+
     return {
         "gateway_demand_mbps": gateway_demand,
         "server_farm_bandwidth_gbps": sf_bandwidth_gbps,
+        "campus_core_100g_card_qty": campus_core_100g_card_qty,
+        "campus_core_10g_1g_card_qty": campus_core_10g_1g_card_qty,
+        "server_farm_core_card_100g_qty": sf_card_100g_qty,
+        "server_farm_core_card_10g_qty": sf_card_10g_qty,
         "building_count": len(buildings),
         "wan_count": len(wan_details),
         "building_details": building_details,
         "wan_details": wan_details,
+        "dc_sdn": dc_sdn_calc,
         "requirements": requirements,
         "proposal_lines": proposal_lines,
     }

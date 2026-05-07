@@ -2008,10 +2008,10 @@ initTopology();
 """
 
 
-def render_topology_page():
+def render_topology_page(user=None):
     return (
         TOPOLOGY_PAGE
         .replace("__BASE_STYLE__", BASE_STYLE)
-        .replace("__NAV__", render_nav("topology"))
+        .replace("__NAV__", render_nav("topology", user))
         .replace("__ICON_DATA__", icon_data_urls())
     )
