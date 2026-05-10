@@ -9,6 +9,41 @@ OPTION_CLASSES = [
     ("opt3", "High End"),
 ]
 
+SPEC_SELECTOR_LABELS = {
+    "throughput_mbps": "Throughput (Mbps)",
+    "switching_bandwidth_gbps": "Switching Bandwidth - Full Duplex (Gbps)",
+    "forwarding_mpps": "Forwarding Capacity (Mpps)",
+    "min_wan_1g": "Số lượng cổng WAN 1GE",
+    "min_wan_10g": "Số lượng cổng WAN 10GE",
+    "min_lan_1g": "Số lượng cổng LAN 1GE",
+    "min_lan_10g": "Số lượng cổng LAN 10GE",
+    "min_1g_rj45": "Số lượng cổng 1GE đồng",
+    "min_1g_sfp": "Số lượng cổng 1GE SFP",
+    "min_10g_rj45": "Số lượng cổng 10GE đồng",
+    "min_10g_sfp": "Số lượng cổng 10GE quang",
+    "min_100g": "Số lượng cổng 100GE",
+    "wifi_users_per_ap": "Số lượng người dùng trong phạm vi phủ sóng 1 AP",
+    "wifi_radius_m": "Bán kính phủ sóng (m)",
+    "speed": "speed",
+    "distance": "distance",
+}
+
+SPEC_SELECTOR_TEXT_LABELS = {
+    "stacking": "Stacking (Y/N)",
+    "poe": "PoE (Y/N)",
+    "wifi_technology": "Công nghệ WiFi (WiFi6/WiFi7)",
+    "antenna_type": "Antenna Type (Omni or Directional)",
+}
+
+SPEC_SELECTOR_CLASS_BY_SHEET = {
+    "Router": "Router Class",
+    "SwitchCampus": "Switch Class",
+    "ModularSwitch": "Switch Class",
+    "NexusSwitch": "Switch Class",
+    "WiFi": "Access Point Class",
+    "SFP": "SFP Class",
+}
+
 CLASS_FALLBACKS = {
     "Low End": ["Low End", "Mid Range", "High End"],
     "Mid Range": ["Mid Range", "High End"],
@@ -54,6 +89,171 @@ def model_text(device: Dict[str, Any]) -> str:
     return normalize_model(device.get("model", "")).upper()
 
 
+def requirement_number(requirement: Dict[str, Any], key: str) -> float:
+    try:
+        return float(requirement.get(key) or 0)
+    except Exception:
+        return 0
+
+
+def spec_selector_requirement_map(requirement: Dict[str, Any]) -> Dict[str, float]:
+    mapped: Dict[str, float] = {}
+
+    for req_key, spec_label in SPEC_SELECTOR_LABELS.items():
+        value = requirement_number(requirement, req_key)
+        if value:
+            mapped[spec_label] = value
+
+    return mapped
+
+
+def spec_selector_text_requirement_map(requirement: Dict[str, Any]) -> Dict[str, str]:
+    mapped: Dict[str, str] = {}
+
+    for req_key, spec_label in SPEC_SELECTOR_TEXT_LABELS.items():
+        value = str(requirement.get(req_key) or "").strip()
+        if value:
+            mapped[spec_label] = value
+
+    return mapped
+
+
+def device_matches_text_requirements(device: Dict[str, Any], requirement: Dict[str, Any]) -> bool:
+    ap_type = str(requirement.get("ap_type") or "").strip().lower()
+    if ap_type and spec_text(device, "Loại Access Point (indoor/outdoor)").lower() != ap_type:
+        return False
+
+    preferred_class = str(requirement.get("preferred_class") or "").strip()
+    if preferred_class and get_class(device) != preferred_class:
+        return False
+
+    return True
+
+
+def device_spec_selector_score(device: Dict[str, Any], criteria: Dict[str, float], text_criteria: Dict[str, str]) -> int:
+    score = 0
+
+    for spec_label, required in criteria.items():
+        available = spec_number(device, spec_label)
+
+        if spec_label == "speed":
+            if available == required:
+                score += 1
+        elif available >= required:
+            score += 1
+
+    for spec_label, required in text_criteria.items():
+        available = spec_text(device, spec_label).lower()
+        if available and required.lower() in available:
+            score += 1
+
+    return score
+
+
+def order_by_device_spec_selector(devices: List[Dict[str, Any]], requirement: Dict[str, Any]) -> List[Dict[str, Any]]:
+    criteria = spec_selector_requirement_map(requirement)
+    text_criteria = spec_selector_text_requirement_map(requirement)
+    candidates = [
+        device
+        for device in devices
+        if normalize_model(device.get("model"))
+        and device_matches_text_requirements(device, requirement)
+    ]
+
+    if not candidates:
+        return []
+
+    if not criteria and not text_criteria:
+        return sorted(candidates, key=lambda device: (device_price(device) <= 0, device_price(device), model_text(device)))
+
+    scored = [(device_spec_selector_score(device, criteria, text_criteria), device) for device in candidates]
+    required_score = len(criteria) + len(text_criteria)
+    best_score_devices = [device for score, device in scored if score >= required_score]
+
+    return sorted(best_score_devices, key=lambda device: (device_price(device) <= 0, device_price(device), model_text(device)))
+
+
+def spec_selector_devices(catalogs: Dict[str, Any], sheet_name: str) -> List[Dict[str, Any]]:
+    if sheet_name == "Router":
+        return list(catalogs.get("routers", []))
+    if sheet_name == "SwitchCampus":
+        return list(catalogs.get("switches", []))
+    if sheet_name == "ModularSwitch":
+        return list(catalogs.get("modular_switches", []))
+    if sheet_name == "NexusSwitch":
+        return list(catalogs.get("nexus_switches", []))
+    if sheet_name == "WiFi":
+        return list(catalogs.get("wifi", []))
+    if sheet_name == "SFP":
+        return list(catalogs.get("sfps", []))
+    return []
+
+
+def spec_selector_sheet_for_line(line: Dict[str, Any]) -> str:
+    requirement = line.get("requirement", {}) or {}
+    explicit_sheet = str(requirement.get("device_spec_sheet") or "").strip()
+    if explicit_sheet:
+        return explicit_sheet
+
+    item_type = str(line.get("item_type") or "").lower()
+    group = str(line.get("group") or "").lower()
+
+    if item_type.startswith("sfp "):
+        return "SFP"
+    if "access point" in item_type:
+        return "WiFi"
+    if "router" in item_type:
+        return "Router"
+    if "nexus" in item_type or "leaf" in item_type or "dc-sdn" in group:
+        return "NexusSwitch"
+    if "modular" in item_type or "spine switch" in item_type:
+        return "ModularSwitch"
+    if "switch" in item_type:
+        return "SwitchCampus"
+
+    return ""
+
+
+def recommend_by_device_specs_sheet(
+    catalogs: Dict[str, Any],
+    line: Dict[str, Any],
+    target_class: str,
+) -> List[Dict[str, Any]]:
+    requirement = dict(line.get("requirement", {}) or {})
+    sheet_name = spec_selector_sheet_for_line(line)
+
+    if not sheet_name:
+        return []
+
+    if not requirement.get("preferred_class") and target_class:
+        requirement["preferred_class"] = target_class
+
+    devices = spec_selector_devices(catalogs, sheet_name)
+    selected = order_by_device_spec_selector(devices, requirement)
+
+    return clone_all(selected, target_class)
+
+
+def recommend_device_specs_candidates(sheet_name: str, requirement: Dict[str, Any]) -> List[Dict[str, Any]]:
+    catalogs = load_catalogs()
+    devices = spec_selector_devices(catalogs, sheet_name)
+    criteria = dict(requirement or {})
+    criteria["device_spec_sheet"] = sheet_name
+    selected = order_by_device_spec_selector(devices, criteria)
+    result = []
+
+    for device in selected:
+        result.append({
+            "model": device.get("model", ""),
+            "price": device_price(device),
+            "class": get_class(device),
+            "sheet": device.get("sheet", sheet_name),
+            "specs": dict(device.get("specs", {})),
+        })
+
+    return result
+
+
 SERVER_FARM_SFP_OPTION_MODELS = {
     "SFP 100G": {"opt1": "Ficer-100G-10km", "opt2": "QSFP-100G-LR4-S", "opt3": "QSFP-100G-LR4-S"},
     "SFP 10G": {"opt1": "Ficer-10G-10km", "opt2": "SFP-10G-LR", "opt3": "SFP-10G-LR-S"},
@@ -64,7 +264,7 @@ SERVER_FARM_ACCESS_SWITCH_DEFAULT_MODELS = {
     "Access Switch 48x10G SFP (hoặc Leaf Switch)": {"opt1": "C9500-48Y4C", "opt2": "C9500X-60L4D", "opt3": "C9500X-60L4D"},
     "Access Switch 48x10G RJ45 (hoặc Leaf Switch)": {"opt1": "N9K-C93216TC-FX2", "opt2": "N9K-C93108TC-FX3", "opt3": "N9K-C93108TC-FX3"},
     "Access Switch 48x1G SFP (hoặc Leaf Switch)": {"opt1": "C9300-48S", "opt2": "C9500-48Y4C", "opt3": "C9300-48S"},
-    "Access Switch 48x1G RJ45 (hoặc Leaf Switch)": {"opt1": "C1300-48T-4G", "opt2": "C9200L-48T-4X", "opt3": "C9300L-48T-4X"},
+    "Access Switch 48x1G RJ45 (hoặc Leaf Switch)": {"opt1": "C1200-48T-4G", "opt2": "C9200L-48T-4X", "opt3": "C9300L-48T-4X"},
 }
 
 SERVER_FARM_ACCESS_SWITCH_OPTION_MODELS = {
@@ -79,7 +279,7 @@ DC_SDN_EXCEL_DEFAULTS = {
     "leaf_1g_sfp": ["N9K-C93360YC-FX2", "N9K-C93240YC-FX2", "N9K-C93180YC-FX3"],
     "leaf_10g_rj45": ["N9K-C93108TC-FX3", "N9K-C93216TC-FX2"],
     "leaf_1g_rj45": ["N9K-C9348GC-FX3", "N9K-C93108TC-FX3", "N9K-C93216TC-FX2"],
-    "sfp_100g_spine_leaf": ["QSFP-100G-LR4-S", "Ficer-100G-10km", "Ficer-100G-40km", "Ficer-100G-80km"],
+    "sfp_100g_spine_leaf": ["QSFP-100G-LR-S", "QSFP-100G-LR4-S", "Ficer-100G-10km", "Ficer-100G-40km", "Ficer-100G-80km"],
     "sfp_100g_server": ["QSFP-100G-LR-S", "QSFP-100G-LR4-S", "Ficer-100G-10km", "Ficer-100G-40km", "Ficer-100G-80km"],
     "sfp_10g_server": ["SFP-10G-SR", "SFP-10G-SR-S", "Ficer-10G-10km", "Ficer-10G-40km", "Ficer-10G-80km"],
     "sfp_1g_server": ["GLC-SX-MMD", "GLC-LH-SMD", "GLC-EX-SMD", "GLC-ZX-SMD", "Ficer-1G-10km", "Ficer-1G-40km", "Ficer-1G-80km"],
@@ -733,21 +933,30 @@ def normalize_recommendation_items(items: List[Dict[str, Any]]) -> List[Dict[str
     ]
 
 
-def recommend_for_line(line: Dict[str, Any]) -> Dict[str, Any]:
+def recommend_for_line(line: Dict[str, Any], use_device_specs_selector: bool = False) -> Dict[str, Any]:
     catalogs = load_catalogs()
     options = {}
+    preferred_class = str((line.get("requirement") or {}).get("preferred_class") or "").strip()
+    valid_classes = {target_class for _, target_class in OPTION_CLASSES}
+    if preferred_class not in valid_classes:
+        preferred_class = ""
 
     for opt_name, target_class in OPTION_CLASSES:
+        effective_class = preferred_class or target_class
         if is_dc_sdn_line(line):
-            recs = recommend_dc_sdn(catalogs, line, target_class)
+            recs = recommend_dc_sdn(catalogs, line, effective_class)
         elif is_server_farm_access_switch_line(line):
-            recs = recommend_server_farm_access_switch(catalogs, line, opt_name, target_class)
+            recs = recommend_server_farm_access_switch(catalogs, line, opt_name, effective_class)
+        elif use_device_specs_selector:
+            recs = recommend_by_device_specs_sheet(catalogs, line, effective_class)
+            if not recs:
+                recs = recommend_for_line_and_class(catalogs, line, effective_class)
         else:
             fixed_option_model = fixed_option_model_for_line(line, opt_name)
             if fixed_option_model:
-                recs = [fixed_model_device(fixed_option_model, target_class, catalogs)]
+                recs = [fixed_model_device(fixed_option_model, effective_class, catalogs)]
             else:
-                recs = recommend_for_line_and_class(catalogs, line, target_class)
+                recs = recommend_for_line_and_class(catalogs, line, effective_class)
         options[opt_name] = normalize_recommendation_items(recs)
 
     return {

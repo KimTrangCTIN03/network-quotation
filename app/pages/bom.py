@@ -1,7 +1,17 @@
 from app.pages.styles import BASE_STYLE, render_nav
 
 
-def render_bom_page(user=None):
+def render_bom_page(
+    user=None,
+    *,
+    storage_key: str = "quoteData",
+    nav_active: str = "bom",
+    title: str = "Xuất BOM",
+    empty_message: str = "Chua co du lieu bao gia de xuat BOM.",
+    single_option: bool = False,
+    download_prefix: str = "network_bom",
+):
+    single_option_js = "true" if single_option else "false"
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -210,9 +220,9 @@ def render_bom_page(user=None):
     </style>
 </head>
 <body>
-{render_nav("bom", user)}
+{render_nav(nav_active, user)}
 <div class="container">
-    <h1>Xuất BOM</h1>
+    <h1>{title}</h1>
     <div id="bom_block"></div>
 </div>
 
@@ -220,7 +230,11 @@ def render_bom_page(user=None):
 let currentBom = null;
 let activeOption = "opt1";
 let bomLoadedFromCache = false;
-const BOM_CACHE_VERSION = "v2";
+const BOM_CACHE_VERSION = "v3";
+const BOM_STORAGE_KEY = "{storage_key}";
+const BOM_EMPTY_MESSAGE = "{empty_message}";
+const BOM_SINGLE_OPTION = {single_option_js};
+const BOM_DOWNLOAD_PREFIX = "{download_prefix}";
 
 function money(v) {{
     return "$" + Number(v || 0).toLocaleString(undefined, {{
@@ -294,12 +308,12 @@ function showBomLoading(message, subMessage) {{
 }}
 
 async function loadBom(forceRefresh = false) {{
-    const raw = localStorage.getItem("quoteData");
+    const raw = localStorage.getItem(BOM_STORAGE_KEY);
 
     if (!raw) {{
         document.getElementById("bom_block").innerHTML = `
             <div class="card">
-                <div class="empty-state">Chua co du lieu bao gia de xuat BOM.</div>
+                <div class="empty-state">${{esc(BOM_EMPTY_MESSAGE)}}</div>
             </div>
         `;
         return;
@@ -353,7 +367,7 @@ function setOption(optionKey) {{
 
 function renderSummary() {{
     const summary = currentBom.summary || {{}};
-    const optionKeys = Object.keys(summary);
+    const optionKeys = BOM_SINGLE_OPTION ? [activeOption].filter(opt => summary[opt]) : Object.keys(summary);
 
     return `
         <div class="bom-summary">
@@ -450,6 +464,7 @@ function renderBom() {{
         activeOption = optionKeys[0];
     }}
     const option = options[activeOption] || {{ rows: [], total: 0, label: activeOption }};
+    const visibleOptionKeys = BOM_SINGLE_OPTION ? [activeOption].filter(opt => options[opt]) : optionKeys;
 
     document.getElementById("bom_block").innerHTML = `
         <div class="group-summary-card">
@@ -461,13 +476,15 @@ function renderBom() {{
         </div>
 
         <div class="group-summary-card">
+            ${{BOM_SINGLE_OPTION ? "" : `
             <div class="bom-tabs">
-                ${{optionKeys.map(opt => `
+                ${{visibleOptionKeys.map(opt => `
                     <button class="bom-tab ${{activeOption === opt ? "active" : ""}}" type="button" onclick="setOption('${{opt}}')">
                         ${{esc(options[opt]?.label || opt)}}
                     </button>
                 `).join("")}}
             </div>
+            `}}
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
                 <h3>${{esc(option.label)}} - ${{money(option.total || 0)}}</h3>
                 <button id="downloadBomBtn" class="btn btn-primary" type="button" onclick="downloadBom()">Download BOM</button>
@@ -479,7 +496,7 @@ function renderBom() {{
 }}
 
 async function downloadBom() {{
-    const raw = localStorage.getItem("quoteData");
+    const raw = localStorage.getItem(BOM_STORAGE_KEY);
     const optionKey = activeOption;
     const btn = document.getElementById("downloadBomBtn");
     const status = document.getElementById("downloadStatus");
@@ -511,7 +528,7 @@ async function downloadBom() {{
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `network_bom_${{optionKey || "all"}}.xlsx`;
+        a.download = `${{BOM_DOWNLOAD_PREFIX}}_${{optionKey || "all"}}.xlsx`;
         document.body.appendChild(a);
         a.click();
         a.remove();

@@ -23,7 +23,9 @@ DETAIL_BOM_SHEETS = [
     "C9200",
     "C9300",
     "C1300",
+    "EstimateDetails_CT167013261VV",
     "C9500",
+    "ModularSwitch",
     "ACI",
     "SFP",
     "AP_input",
@@ -36,7 +38,9 @@ DETAIL_BOM_FILES = [
     "C9200.xlsx",
     "C9300.xlsx",
     "C1300.xlsx",
+    "C1200.xlsx",
     "C9500.xlsx",
+    "ModularSwitch.xlsx",
     "ACI.xlsx",
     "SFP.xlsx",
     "AP.xlsx",
@@ -122,6 +126,33 @@ def normalized_candidates(model: str) -> List[str]:
     return list(dict.fromkeys([c for c in candidates if c]))
 
 
+def detail_bom_file_paths() -> List[Path]:
+    if not BOM_DIR.exists():
+        return []
+
+    known_files = [BOM_DIR / file_name for file_name in DETAIL_BOM_FILES]
+    extra_files = [
+        path
+        for path in sorted(BOM_DIR.glob("*.xlsx"))
+        if path.name not in DETAIL_BOM_FILES and not path.name.startswith("~$")
+    ]
+    return [path for path in known_files if path.exists()] + extra_files
+
+
+def iter_detail_bom_sheets(wb) -> List[Any]:
+    known_sheets = [
+        wb[sheet_name]
+        for sheet_name in DETAIL_BOM_SHEETS
+        if sheet_name in wb.sheetnames
+    ]
+    extra_sheets = [
+        wb[sheet_name]
+        for sheet_name in wb.sheetnames
+        if sheet_name not in DETAIL_BOM_SHEETS
+    ]
+    return known_sheets + extra_sheets
+
+
 def row_to_bom_part(
     wb,
     ws,
@@ -185,12 +216,7 @@ def find_part_block(
     candidates = set(normalized_candidates(model))
 
     for wb in workbooks:
-        for sheet_name in DETAIL_BOM_SHEETS:
-            if sheet_name not in wb.sheetnames:
-                continue
-
-            ws = wb[sheet_name]
-
+        for ws in iter_detail_bom_sheets(wb):
             for row in range(2, ws.max_row + 1):
                 line_number = cell_value(wb, ws, row, 1)
                 part_number = cell_value(wb, ws, row, 2)
@@ -247,12 +273,7 @@ def find_part_rows(
     parts = []
 
     for wb in workbooks:
-        for sheet_name in DETAIL_BOM_SHEETS:
-            if sheet_name not in wb.sheetnames:
-                continue
-
-            ws = wb[sheet_name]
-
+        for ws in iter_detail_bom_sheets(wb):
             for row in range(2, ws.max_row + 1):
                 part_number = cell_value(wb, ws, row, 2)
 
@@ -294,12 +315,7 @@ def find_selected_rows_from_block(
     include_candidates = {normalize_model(model) for model in include_models}
 
     for wb in workbooks:
-        for sheet_name in DETAIL_BOM_SHEETS:
-            if sheet_name not in wb.sheetnames:
-                continue
-
-            ws = wb[sheet_name]
-
+        for ws in iter_detail_bom_sheets(wb):
             for row in range(2, ws.max_row + 1):
                 line_number = cell_value(wb, ws, row, 1)
                 part_number = cell_value(wb, ws, row, 2)
@@ -348,12 +364,7 @@ def find_bundle_parts(
     candidates = set(normalized_candidates(base_model or selected_model))
 
     for wb in workbooks:
-        for sheet_name in DETAIL_BOM_SHEETS:
-            if sheet_name not in wb.sheetnames:
-                continue
-
-            ws = wb[sheet_name]
-
+        for ws in iter_detail_bom_sheets(wb):
             for row in range(2, ws.max_row + 1):
                 line_number = cell_value(wb, ws, row, 1)
                 part_number = cell_value(wb, ws, row, 2)
@@ -477,14 +488,8 @@ def add_separate_component_blocks(
 def load_detail_bom_workbooks() -> List[Any]:
     workbooks = []
 
-    if not BOM_DIR.exists():
-        return workbooks
-
-    for file_name in DETAIL_BOM_FILES:
-        file_path = BOM_DIR / file_name
-
-        if file_path.exists():
-            workbooks.append(openpyxl.load_workbook(file_path, data_only=False))
+    for file_path in detail_bom_file_paths():
+        workbooks.append(openpyxl.load_workbook(file_path, data_only=False))
 
     return workbooks
 

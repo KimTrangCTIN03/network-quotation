@@ -25,6 +25,7 @@ from app.auth import (
 )
 from app.bom_engine import build_bom, build_bom_excel
 from app.catalog_engine import compare_price_map_with_cisco_tab, debug_catalog_summary
+from app.manual_device_engine import build_quote_from_device_list
 from app.pages import (
     render_account_page,
     render_admin_page,
@@ -32,6 +33,7 @@ from app.pages import (
     render_calculation_results_page,
     render_dashboard_page,
     render_login_page,
+    render_model_quote_page,
     render_pricing_page,
     render_quote_page,
     render_register_page,
@@ -42,9 +44,18 @@ from app.pricing.catalog import list_price_entries, save_am_price
 from app.pricing.storage import check_database
 from app.pricing_engine import import_prices_from_bom, quote_bom
 from app.quote_engine import build_quote
-from app.recommendation_engine import recommend_all
+from app.recommendation_engine import recommend_all, recommend_device_specs_candidates, recommend_for_line
 from app.requirement_engine import build_requirements
-from app.schemas import AmPricePayload, BomPayload, QuoteRecordPayload, SurveyPayload, payload_to_dict
+from app.schemas import (
+    AmPricePayload,
+    BomPayload,
+    DeviceRecommendPayload,
+    DeviceSpecsRecommendPayload,
+    ManualDeviceListPayload,
+    QuoteRecordPayload,
+    SurveyPayload,
+    payload_to_dict,
+)
 
 
 app = FastAPI(title="Network Quotation Web")
@@ -239,6 +250,14 @@ def quote_page(request: Request):
     return render_quote_page(user)
 
 
+@app.get("/model-quote", response_class=HTMLResponse)
+def model_quote_page(request: Request):
+    user = page_user(request)
+    if not user:
+        return login_redirect(request)
+    return render_model_quote_page(user)
+
+
 @app.get("/topology", response_class=HTMLResponse)
 def topology_page(request: Request):
     user = page_user(request)
@@ -253,6 +272,22 @@ def bom_page(request: Request):
     if not user:
         return login_redirect(request)
     return render_bom_page(user)
+
+
+@app.get("/model-bom", response_class=HTMLResponse)
+def model_bom_page(request: Request):
+    user = page_user(request)
+    if not user:
+        return login_redirect(request)
+    return render_bom_page(
+        user,
+        storage_key="modelBomQuoteData",
+        nav_active="model_quote",
+        title="Xuất BOM on-demand",
+        empty_message="Chua co list thiet bi de xuat BOM on-demand.",
+        single_option=True,
+        download_prefix="model_bom",
+    )
 
 
 @app.get("/pricing", response_class=HTMLResponse)
@@ -332,6 +367,52 @@ def api_generate_quote(payload: SurveyPayload, _user=Depends(require_api_user)):
         "requirements": req,
         "quote": quote,
     }
+
+
+@app.post("/api/recommend-device")
+def api_recommend_device(payload: DeviceRecommendPayload, _user=Depends(require_api_user)):
+    line = {
+        "group": payload.group,
+        "item_type": payload.item_type,
+        "quantity": payload.quantity,
+        "requirement": payload.requirement,
+    }
+    recommended_line = recommend_for_line(line, use_device_specs_selector=True)
+    quote = build_quote([recommended_line])
+    log_activity(_user, "recommend_device", "quote", "", payload.item_type)
+
+    return {
+        "line": recommended_line,
+        "quote_data": {
+            "requirements": {
+                "source": "manual_requirement",
+                "requirements": [line],
+                "proposal_lines": [line],
+            },
+            "quote": quote,
+        },
+    }
+
+
+@app.post("/api/recommend-device-specs")
+def api_recommend_device_specs(payload: DeviceSpecsRecommendPayload, _user=Depends(require_api_user)):
+    devices = recommend_device_specs_candidates(payload.sheet, payload.requirement)
+    log_activity(_user, "recommend_device_specs", "quote", "", payload.sheet)
+    return {
+        "sheet": payload.sheet,
+        "quantity": payload.quantity,
+        "requirement": payload.requirement,
+        "best": devices[0] if devices else None,
+        "alternatives": devices[1:],
+        "devices": devices,
+    }
+
+
+@app.post("/api/device-list-quote")
+def api_device_list_quote(payload: ManualDeviceListPayload, _user=Depends(require_api_user)):
+    result = build_quote_from_device_list(payload.text)
+    log_activity(_user, "device_list_quote", "quote", "", f"{len(result.get('quote', {}).get('quote_lines', []))} lines")
+    return result
 
 
 @app.post("/api/build-bom")

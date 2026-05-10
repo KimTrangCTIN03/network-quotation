@@ -413,7 +413,7 @@ def render_quote_page(user=None):
 <div class="container">
     <div class="page-header">
         <div class="page-header-left">
-            <h1>Chọn model và tổng hợp báo giá</h1>
+            <h1>Chọn model giải pháp</h1>
             <div class="subtitle"></div>
         </div>
     </div>

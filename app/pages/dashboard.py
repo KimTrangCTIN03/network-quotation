@@ -149,6 +149,15 @@ def render_dashboard_page(user=None):
                 <a class="btn btn-primary" href="/pricing">Bắt đầu</a>
             </div>
         </div>
+
+        <div class="module-card">
+            <div class="module-kicker"></div>
+            <h2>Chọn model & tổng hợp báo giá</h2>
+
+            <div class="module-actions">
+                <a class="btn btn-primary" href="/model-quote">Bắt đầu</a>
+            </div>
+        </div>
     </div>
 
     

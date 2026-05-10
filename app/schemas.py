@@ -17,6 +17,23 @@ class BomPayload(BaseModel):
     group_filter: str | None = None
 
 
+class DeviceRecommendPayload(BaseModel):
+    group: str = "De xuat thiet bi"
+    item_type: str
+    quantity: int = 1
+    requirement: Dict[str, Any] = {}
+
+
+class ManualDeviceListPayload(BaseModel):
+    text: str
+
+
+class DeviceSpecsRecommendPayload(BaseModel):
+    sheet: str
+    quantity: int = 1
+    requirement: Dict[str, Any] = {}
+
+
 class AmPricePayload(BaseModel):
     model: str
     vendor: str = "Cisco"

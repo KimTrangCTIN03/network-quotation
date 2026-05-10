@@ -258,12 +258,18 @@ def fixed_model_requirement(model: str) -> Dict[str, Any]:
 
 DC_SDN_DEFAULT_CAPACITY = {
     "N9K-C9504": {"min_100g": 144},
+    "N9K-C9508": {"min_100g": 288},
+    "N9K-C9516": {"min_100g": 576},
     "N9K-X9736C-FX3": {"min_100g": 36},
+    "N9K-C93600CD-GX": {"min_100g": 36},
     "N9K-C9316D-GX": {"min_100g": 16},
+    "N9K-C9364C-GX": {"min_100g": 64},
+    "N9K-C93360YC-FX2": {"min_10g_sfp": 96, "min_1g_sfp": 96, "min_100g": 12},
     "N9K-C93240YC-FX2": {"min_10g_sfp": 48},
-    "N9K-C93180YC-FX3": {"min_1g_sfp": 48},
+    "N9K-C93180YC-FX3": {"min_10g_sfp": 48, "min_1g_sfp": 48},
     "N9K-C9348GC-FX3": {"min_1g_rj45": 48},
-    "N9K-C93108TC-FX3": {"min_1g_rj45": 48, "min_10g_rj45": 48},
+    "N9K-C93108TC-FX3": {"min_1g_rj45": 48, "min_10g_rj45": 48, "min_100g": 6},
+    "N9K-C93216TC-FX2": {"min_1g_rj45": 96, "min_10g_rj45": 96, "min_100g": 12},
 }
 
 
@@ -295,10 +301,10 @@ def calculate_dc_sdn(dc_sdn: Dict[str, Any]) -> Dict[str, Any]:
 
     spine_qty = 2
     leaf_100g_default = "N9K-C9316D-GX"
-    leaf_10g_sfp_default = "N9K-C93240YC-FX2"
+    leaf_10g_sfp_default = "N9K-C93180YC-FX3"
     leaf_1g_sfp_default = "N9K-C93180YC-FX3"
     leaf_10g_rj45_default = "N9K-C93108TC-FX3"
-    leaf_1g_rj45_default = "N9K-C93108TC-FX3"
+    leaf_1g_rj45_default = "N9K-C9348GC-FX3"
     card_default = "N9K-X9736C-FX3"
 
     # DC-SDN leaf sizing follows the survey labels directly.
@@ -365,10 +371,10 @@ def calculate_dc_sdn(dc_sdn: Dict[str, Any]) -> Dict[str, Any]:
 
     spine_qty = 2
     leaf_100g_default = "N9K-C9316D-GX"
-    leaf_10g_sfp_default = "N9K-C93240YC-FX2"
+    leaf_10g_sfp_default = "N9K-C93180YC-FX3"
     leaf_1g_sfp_default = "N9K-C93180YC-FX3"
     leaf_10g_rj45_default = "N9K-C93108TC-FX3"
-    leaf_1g_rj45_default = "N9K-C93108TC-FX3"
+    leaf_1g_rj45_default = "N9K-C9348GC-FX3"
     card_default = "N9K-X9736C-FX3"
 
     # DC-SDN leaf sizing follows the survey labels directly.
@@ -403,8 +409,8 @@ def calculate_dc_sdn(dc_sdn: Dict[str, Any]) -> Dict[str, Any]:
         proposal_line("DC-SDN", "Leaf 10G quang", leaf_10g_sfp_qty, dc_sdn_requirement("leaf_10g_sfp", leaf_10g_sfp_default, min_10g_sfp=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B18:Z18")),
         proposal_line("DC-SDN", "Leaf 1G quang", leaf_1g_sfp_qty, dc_sdn_requirement("leaf_1g_sfp", leaf_1g_sfp_default, min_1g_sfp=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B19:Z19")),
         proposal_line("DC-SDN", "Leaf 10G dong", leaf_10g_rj45_qty, dc_sdn_requirement("leaf_10g_rj45", leaf_10g_rj45_default, min_10g_rj45=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B20:Z20")),
-        proposal_line("DC-SDN", "Leaf 1G dong", leaf_1g_rj45_qty, dc_sdn_requirement("leaf_1g_rj45", leaf_1g_rj45_default, min_1g_rj45=48, model_prefix="N9K-C93", excel_range="DC-Calculation!B21:Z21")),
-        proposal_line("DC-SDN", "SFP 100G kết nối Spine-Leaf", total_leaf_qty * 4, dc_sdn_requirement("sfp_100g_spine_leaf", "QSFP-100G-LR4-S", speed=100, distance=10, excel_range="DC-Calculation!B24:Z28")),
+        proposal_line("DC-SDN", "Leaf 1G dong", leaf_1g_rj45_qty, dc_sdn_requirement("leaf_1g_rj45", leaf_1g_rj45_default, min_1g_rj45=24, model_prefix="N9K-C93", excel_range="DC-Calculation!B21:Z21")),
+        proposal_line("DC-SDN", "SFP 100G kết nối Spine-Leaf", total_leaf_qty * 4, dc_sdn_requirement("sfp_100g_spine_leaf", "QSFP-100G-LR-S", speed=100, distance=10, excel_range="DC-Calculation!B24:Z28")),
         proposal_line("DC-SDN", "SFP 100G kết nối Server", racks * servers_per_rack * p100, dc_sdn_requirement("sfp_100g_server", "QSFP-100G-LR-S", speed=100, distance=10, excel_range="DC-Calculation!B24:Z28")),
         proposal_line("DC-SDN", "SFP 10G kết nối Server", racks * servers_per_rack * p10_sfp, dc_sdn_requirement("sfp_10g_server", "SFP-10G-SR", speed=10, distance=0.5, excel_range="DC-Calculation!B24:Z28")),
         proposal_line("DC-SDN", "SFP 1G kết nối Server", racks * servers_per_rack * p1_sfp, dc_sdn_requirement("sfp_1g_server", "GLC-SX-MMD", speed=1, distance=0.5, excel_range="DC-Calculation!B24:Z28")),
@@ -510,6 +516,7 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
     sf_enabled = to_bool(server_farm.get("enabled", False))
 
     sf_bandwidth_gbps = 0
+    sf_campus_uplink_bandwidth_gbps = 0
     sf_core_spine_qty = 0
     sf_card_100g_qty = 0
     sf_card_10g_qty = 0
@@ -545,7 +552,15 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
         # Logic theo file Excel:
         # SF BW = rack × server/rack × (100GE/server × 100 + 10GE SFP/server × 10 + 10GE RJ45/server)
         # 1GE không tham gia tính SF BW.
+        # Latest workbook formula for Server Farm SFP rows 55-56.
         sf_bandwidth_gbps = total_servers * (
+            p100 * 100
+            + p10_sfp * 10
+            + p10_rj45 * 10
+            + p1_sfp
+            + p1_rj45
+        )
+        sf_campus_uplink_bandwidth_gbps = total_servers * (
             p100 * 100
             + p10_sfp * 10
             + p10_rj45
@@ -582,13 +597,13 @@ def build_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
     # 3. SFP calculation
     # =========================
 
-    campus_sfp_100g_qty = 8 if sf_bandwidth_gbps > 60 else 0
+    campus_sfp_100g_qty = 8 if sf_campus_uplink_bandwidth_gbps > 60 else 0
 
     campus_sfp_10g_qty = (
         (campus_gateway_router_qty * 4 + campus_firewall_qty * 4)
         if gateway_demand >= 5000
         else 0
-    ) + (8 if sf_bandwidth_gbps <= 60 else 0)
+    ) + (8 if sf_campus_uplink_bandwidth_gbps <= 60 else 0)
 
     # Campus SFP 1G:
     # Mỗi access switch có 2 uplink.

@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 import re
 
 import openpyxl
+from openpyxl.utils import column_index_from_string
 
 
 DATA_DIR = Path("data")
@@ -20,6 +21,7 @@ SOURCE_BOM_SHEETS = [
     "C9200",
     "C9300",
     "C1300",
+    "EstimateDetails_CT167013261VV",
     "C9500",
     "ModularSwitch",
     "ACI",
@@ -34,6 +36,7 @@ SOURCE_BOM_FILES = [
     "C9200.xlsx",
     "C9300.xlsx",
     "C1300.xlsx",
+    "C1200.xlsx",
     "C9500.xlsx",
     "ModularSwitch.xlsx",
     "ACI.xlsx",
@@ -165,6 +168,114 @@ def resolve_simple_ref(wb, formula: str) -> Any:
     return parse_google_export_formula(wb[sheet_name][cell_ref].value)
 
 
+def evaluate_simple_excel_formula(wb, ws, formula: str, seen: set[str] | None = None) -> Any:
+    if not isinstance(formula, str) or not formula.startswith("="):
+        return formula
+
+    expression = formula.strip()[1:].replace("$", "")
+    seen = seen or set()
+
+    try:
+        while "ROUND(" in expression.upper():
+            next_expression = replace_one_round_formula(wb, ws, expression, seen)
+            if next_expression == expression:
+                break
+            expression = next_expression
+
+        return evaluate_arithmetic_expression(wb, ws, expression, seen)
+    except Exception:
+        return None
+
+
+def replace_one_round_formula(wb, ws, expression: str, seen: set[str]) -> str:
+    start = expression.upper().rfind("ROUND(")
+    if start < 0:
+        return expression
+
+    open_index = start + len("ROUND")
+    depth = 0
+    close_index = -1
+
+    for index in range(open_index, len(expression)):
+        char = expression[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                close_index = index
+                break
+
+    if close_index < 0:
+        return expression
+
+    inner = expression[open_index + 1:close_index]
+    comma_index = find_top_level_comma(inner)
+
+    if comma_index < 0:
+        return expression
+
+    value_expression = inner[:comma_index]
+    digits_expression = inner[comma_index + 1:]
+    value = evaluate_arithmetic_expression(wb, ws, value_expression, seen)
+    digits = evaluate_arithmetic_expression(wb, ws, digits_expression, seen)
+
+    if value is None or digits is None:
+        return expression
+
+    rounded = round(value, int(digits))
+    return f"{expression[:start]}{rounded}{expression[close_index + 1:]}"
+
+
+def find_top_level_comma(expression: str) -> int:
+    depth = 0
+
+    for index, char in enumerate(expression):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "," and depth == 0:
+            return index
+
+    return -1
+
+
+def evaluate_arithmetic_expression(wb, ws, expression: str, seen: set[str]) -> float | None:
+    def cell_replacer(match):
+        sheet_name = match.group("sheet")
+        cell_ref = match.group("cell")
+        if sheet_name:
+            sheet_name = sheet_name.strip("'")
+        target_ws = wb[sheet_name] if sheet_name else ws
+        key = f"{target_ws.title}!{cell_ref}"
+
+        if key in seen:
+            raise ValueError("Circular formula reference")
+
+        seen.add(key)
+        value = cell_value(
+            wb,
+            target_ws,
+            int(re.search(r"\d+", cell_ref).group(0)),
+            column_index_from_string(re.search(r"[A-Z]+", cell_ref).group(0)),
+        )
+        seen.remove(key)
+
+        return str(to_float(value, 0))
+
+    expression = re.sub(
+        r"(?:(?P<sheet>'[^']+'|[A-Za-z0-9_ ]+)!)?(?P<cell>[A-Z]{1,3}\d+)",
+        cell_replacer,
+        expression,
+    )
+
+    if not re.fullmatch(r"[0-9.\s+\-*/(),]+", expression):
+        return None
+
+    return float(eval(expression, {"__builtins__": {}}, {}))
+
+
 def cell_value(wb, ws, row: int, col: int) -> Any:
     raw = ws.cell(row=row, column=col).value
 
@@ -173,6 +284,11 @@ def cell_value(wb, ws, row: int, col: int) -> Any:
 
         if ref_value is not None:
             return ref_value
+
+        formula_value = evaluate_simple_excel_formula(wb, ws, raw)
+
+        if formula_value is not None:
+            return formula_value
 
     return parse_google_export_formula(raw)
 
@@ -593,6 +709,128 @@ def read_specs_matrix_sheet(sheet_name: str) -> List[Dict[str, Any]]:
     return devices
 
 
+SWITCH_SPEC_KEYS = {
+    "class": "Switch Class",
+    "bandwidth": "Switching Bandwidth - Full Duplex (Gbps)",
+    "forwarding": "Forwarding Capacity (Mpps)",
+    "1g_rj45": "Sá»‘ lÆ°á»£ng cá»•ng 1GE Ä‘á»“ng",
+    "1g_sfp": "Sá»‘ lÆ°á»£ng cá»•ng 1GE SFP",
+    "10g_rj45": "Sá»‘ lÆ°á»£ng cá»•ng 10GE Ä‘á»“ng",
+    "10g_sfp": "Sá»‘ lÆ°á»£ng cá»•ng 10GE quang",
+    "100g": "Sá»‘ lÆ°á»£ng cá»•ng 100GE",
+    "stacking": "Stacking (Y/N)",
+    "poe": "PoE (Y/N)",
+}
+
+
+def infer_switch_class_from_model(model: str) -> str:
+    text = model.upper()
+
+    if text.startswith(("C1200", "C1300", "C9200")):
+        return "Low End"
+    if text.startswith(("C9300", "C9400", "C9500", "N9K-C93")):
+        return "Mid Range"
+    if text.startswith(("C9600", "C9500X", "N9K-C95", "N9K-C936", "N9K-C933")):
+        return "High End"
+    return ""
+
+
+def looks_like_switch_model(model: str) -> bool:
+    text = model.upper()
+    return text.startswith(("C1200", "C1300", "C9200", "C9300", "C9400", "C9500", "C9600", "N9K-"))
+
+
+def infer_switch_ports_from_model(model: str) -> Dict[str, float]:
+    text = model.upper()
+    ports = {
+        "1g_rj45": 0.0,
+        "1g_sfp": 0.0,
+        "10g_rj45": 0.0,
+        "10g_sfp": 0.0,
+        "100g": 0.0,
+    }
+
+    if match := re.search(r"-(\d+)([A-Z]+)", text):
+        count = to_float(match.group(1), 0)
+        suffix = match.group(2)
+
+        if "D" in suffix or "C" in suffix:
+            ports["100g"] = max(ports["100g"], count)
+        elif "Y" in suffix or "S" in suffix or "X" in suffix:
+            ports["10g_sfp"] = max(ports["10g_sfp"], count)
+        elif "T" in suffix:
+            ports["1g_rj45"] = max(ports["1g_rj45"], count)
+        elif "P" in suffix or "U" in suffix:
+            ports["1g_rj45"] = max(ports["1g_rj45"], count)
+
+    for count_text, speed_text in re.findall(r"-(\d+)([GX])", text):
+        count = to_float(count_text, 0)
+        if speed_text == "X":
+            ports["10g_sfp"] = max(ports["10g_sfp"], count)
+        elif speed_text == "G":
+            ports["1g_sfp"] = max(ports["1g_sfp"], count)
+
+    if text.startswith("N9K-C93108TC") or text.startswith("N9K-C93216TC"):
+        ports["10g_rj45"] = max(ports["10g_rj45"], 48)
+        ports["100g"] = max(ports["100g"], 6)
+    elif text.startswith("N9K-C93180YC") or text.startswith("N9K-C93240YC") or text.startswith("N9K-C93360YC"):
+        ports["10g_sfp"] = max(ports["10g_sfp"], 48)
+        ports["100g"] = max(ports["100g"], 6)
+    elif text.startswith("N9K-C936") or text.startswith("N9K-X97"):
+        ports["100g"] = max(ports["100g"], 32)
+
+    return ports
+
+
+def synthetic_switch_device(model: str, price: float) -> Dict[str, Any]:
+    model_key = normalize_model(model)
+    ports = infer_switch_ports_from_model(model_key)
+    specs = {
+        SWITCH_SPEC_KEYS["class"]: infer_switch_class_from_model(model_key),
+        SWITCH_SPEC_KEYS["bandwidth"]: 0,
+        SWITCH_SPEC_KEYS["forwarding"]: 0,
+        SWITCH_SPEC_KEYS["1g_rj45"]: ports["1g_rj45"],
+        SWITCH_SPEC_KEYS["1g_sfp"]: ports["1g_sfp"],
+        SWITCH_SPEC_KEYS["10g_rj45"]: ports["10g_rj45"],
+        SWITCH_SPEC_KEYS["10g_sfp"]: ports["10g_sfp"],
+        SWITCH_SPEC_KEYS["100g"]: ports["100g"],
+        SWITCH_SPEC_KEYS["stacking"]: "Y" if model_key.upper().startswith(("C9200", "C9300", "C9500", "C9600")) else "",
+        SWITCH_SPEC_KEYS["poe"]: "Y" if re.search(r"-\d+[A-Z]*P", model_key.upper()) else "",
+        "selection_source": "bom_price_catalog",
+    }
+    sheet = "NexusSwitch" if model_key.upper().startswith("N9K-") else "SwitchCampus"
+
+    return {
+        "model": model_key,
+        "sheet": sheet,
+        "class": infer_switch_class_from_model(model_key),
+        "price": price,
+        "specs": specs,
+    }
+
+
+def merge_synthetic_switches(devices: List[Dict[str, Any]], sheet_name: str, prices: Dict[str, float]) -> List[Dict[str, Any]]:
+    by_model = {normalize_model(device.get("model")): dict(device) for device in devices if normalize_model(device.get("model"))}
+
+    for model, price in prices.items():
+        model_key = normalize_model(model)
+        if not model_key or model_key in by_model or not looks_like_switch_model(model_key):
+            continue
+
+        synthetic = synthetic_switch_device(model_key, price)
+        if synthetic["sheet"] == sheet_name:
+            by_model[model_key] = synthetic
+
+    return sorted(
+        by_model.values(),
+        key=lambda device: (
+            to_float(device.get("price"), 0) <= 0,
+            to_float(device.get("price"), 0),
+            str(device.get("model") or ""),
+        ),
+    )
+
+
 def infer_sfp_speed(model: str, description: str = "") -> float:
     text = f"{model} {description}".upper()
 
@@ -770,12 +1008,13 @@ def read_sfp_catalog() -> List[Dict[str, Any]]:
 
 @lru_cache(maxsize=1)
 def load_catalogs() -> Dict[str, Any]:
+    prices = read_price_map()
     return {
-        "prices": read_price_map(),
+        "prices": prices,
         "routers": read_specs_matrix_sheet("Router"),
-        "switches": read_specs_matrix_sheet("SwitchCampus"),
+        "switches": merge_synthetic_switches(read_specs_matrix_sheet("SwitchCampus"), "SwitchCampus", prices),
         "modular_switches": read_specs_matrix_sheet("ModularSwitch"),
-        "nexus_switches": read_specs_matrix_sheet("NexusSwitch"),
+        "nexus_switches": merge_synthetic_switches(read_specs_matrix_sheet("NexusSwitch"), "NexusSwitch", prices),
         "wifi": read_specs_matrix_sheet("WiFi"),
         "sfps": read_sfp_catalog(),
     }

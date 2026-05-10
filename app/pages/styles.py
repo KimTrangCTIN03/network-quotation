@@ -1,11 +1,22 @@
 BASE_STYLE = """
 <style>
+    :root {
+        --app-font-family: Arial, Helvetica, sans-serif;
+    }
     * { box-sizing: border-box; }
     body {
-        font-family: Arial, sans-serif;
+        font-family: var(--app-font-family);
         margin: 0;
         background: #f4f7fb;
         color: #0f172a;
+    }
+    input,
+    select,
+    textarea,
+    button,
+    table,
+    pre {
+        font-family: var(--app-font-family);
     }
     .app-nav {
         position: sticky;
@@ -307,7 +318,6 @@ BASE_STYLE = """
     pre {
         margin: 0;
         white-space: pre-wrap;
-        font-family: Consolas, monospace;
         font-size: 12px;
     }
     @media (max-width: 720px) {
@@ -343,6 +353,7 @@ def render_nav(active: str = "", user: dict | None = None) -> str:
     items = [
         ("dashboard", "/dashboard", "Dashboard"),
         ("solution", "/survey", "Gi&#7843;i ph&#225;p"),
+        ("model_quote", "/model-quote", "Ch&#7885;n model"),
         ("pricing", "/pricing", "Catalog gi&#225;"),
     ]
     if user and user.get("role") == "admin":
