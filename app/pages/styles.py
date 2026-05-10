@@ -367,10 +367,10 @@ def render_nav(active: str = "", user: dict | None = None) -> str:
     )
     solution_items = [
         ("survey", "/survey", "Kh&#7843;o s&#225;t"),
-        ("calculation", "/calculation-results", "K&#7871;t qu&#7843;"),
-        ("topology", "/topology", "Topo"),
-        ("quote", "/quote", "Ch&#7885;n model"),
-        ("bom", "/bom", "BOM"),
+        ("calculation", "/calculation-results", "K&#7871;t qu&#7843; Campus / DC-SDN"),
+        ("topology", "/topology", "Topo Campus"),
+        ("quote", "/quote", "Model Campus / DC-SDN"),
+        ("bom", "/bom", "BOM Campus / DC-SDN"),
     ]
     solution_links = "".join(
         f'<a class="app-sub-nav-link{" active" if key == active else ""}" href="{href}">{label}</a>'

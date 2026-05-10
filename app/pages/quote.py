@@ -98,6 +98,24 @@ def render_quote_page(user=None):
             font-size: 22px;
         }}
 
+        .solution-label {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 12px;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }}
+
+        .solution-label.dc {{
+            background: #fff7ed;
+            color: #9a3412;
+        }}
+
         .table-card-header p {{
             margin: 8px 0 0;
             color: #64748b;
@@ -700,6 +718,12 @@ function renderSummary(lines) {{
         }});
     }}
 
+    const campusTotals = {{
+        opt1: totals.opt1 - dcSingleTotal,
+        opt2: totals.opt2 - dcSingleTotal,
+        opt3: totals.opt3 - dcSingleTotal
+    }};
+
     let groupRows = "";
     const preferredOrder = ["Campus - Trụ sở chính", "Server Farm", "WAN", "DC-SDN"];
     const orderedGroups = [
@@ -726,20 +750,20 @@ function renderSummary(lines) {{
         <div class="group-summary-card">
             <div class="summary-grid-quote">
                 <div class="quote-metric">
-                    <div class="label">Option 1 - Low End</div>
-                    <div class="value">${{money(totals.opt1)}}</div>
+                    <div class="label">Giải pháp Campus - Option 1</div>
+                    <div class="value">${{money(campusTotals.opt1)}}</div>
                 </div>
                 <div class="quote-metric">
-                    <div class="label">Option 2 - Mid Range</div>
-                    <div class="value">${{money(totals.opt2)}}</div>
+                    <div class="label">Giải pháp Campus - Option 2</div>
+                    <div class="value">${{money(campusTotals.opt2)}}</div>
                 </div>
                 <div class="quote-metric">
-                    <div class="label">Option 3 - High End</div>
-                    <div class="value">${{money(totals.opt3)}}</div>
+                    <div class="label">Giải pháp Campus - Option 3</div>
+                    <div class="value">${{money(campusTotals.opt3)}}</div>
                 </div>
                 ${{dcSingleTotal > 0 ? `
                     <div class="quote-metric dc-metric">
-                        <div class="label">DC-SDN</div>
+                        <div class="label">Giải pháp DC-SDN</div>
                         <div class="value">${{money(dcSingleTotal)}}</div>
                     </div>
                 ` : ""}}
@@ -807,8 +831,8 @@ function renderDcSdnQuoteTable(entries) {{
     return `
         <div class="table-card dc-quote-card" id="dc_sdn_quote_block">
             <div class="table-card-header">
+                <div class="solution-label dc">Giải pháp DC-SDN</div>
                 <h2>Chọn thiết bị DC-SDN</h2>
-                
             </div>
             <div class="table-wrap">
                 <table class="quote-table dc-quote-table">
@@ -864,8 +888,8 @@ function renderQuoteTable(lines) {{
     document.getElementById("quote_block").innerHTML = `
         <div class="table-card">
             <div class="table-card-header">
-                <h2>Bảng chọn model theo từng option</h2>
-                
+                <div class="solution-label">Giải pháp Campus</div>
+                <h2>Bảng chọn model Campus / Server Farm / WAN</h2>
             </div>
 
             <div class="table-wrap">

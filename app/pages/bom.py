@@ -67,6 +67,24 @@ def render_bom_page(
             margin: 0;
         }}
 
+        .solution-label {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 12px;
+            font-weight: 800;
+            margin-right: 10px;
+        }}
+
+        .solution-label.dc {{
+            background: #fff7ed;
+            color: #9a3412;
+        }}
+
         .cache-pill {{
             display: inline-flex;
             align-items: center;
@@ -486,7 +504,10 @@ function renderBom() {{
             </div>
             `}}
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-                <h3>${{esc(option.label)}} - ${{money(option.total || 0)}}</h3>
+                <h3>
+                    <span class="solution-label ${{activeOption === "dc_sdn" ? "dc" : ""}}">${{activeOption === "dc_sdn" ? "Giải pháp DC-SDN" : "Giải pháp Campus"}}</span>
+                    ${{esc(option.label)}} - ${{money(option.total || 0)}}
+                </h3>
                 <button id="downloadBomBtn" class="btn btn-primary" type="button" onclick="downloadBom()">Download BOM</button>
             </div>
             <div id="downloadStatus" class="small" style="margin:8px 0 12px;"></div>

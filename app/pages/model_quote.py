@@ -406,6 +406,7 @@ def render_model_quote_page(user=None):
         <a class="btn btn-secondary" href="/model-bom">Xuất BOM</a>
         <a class="btn btn-secondary" href="/dashboard">Về Dashboard</a>
     </div>
+
 </div>
 
 <script>
@@ -415,6 +416,13 @@ const MIN_MANUAL_ROWS = 1;
 let manualRows = Array.from({{ length: MIN_MANUAL_ROWS }}, () => ({{ model: "", quantity: "", price: 0 }}));
 let currentSpecSheet = "SwitchCampus";
 let manualPriceTimer = null;
+let stateSaveTimer = null;
+let activeModelTab = "recommend";
+let savedSpecRequirement = null;
+let savedSpecQuantity = 1;
+let restoringModelState = false;
+let specStateBySheet = {{}};
+const MODEL_STATE_KEY = "modelQuoteState";
 
 const SPEC_SHEET_FIELDS = {{
     Router: [
@@ -474,14 +482,17 @@ const SPEC_LABEL_ALIASES = {{
 }};
 
 function setModelTab(tabName) {{
+    activeModelTab = tabName;
     document.querySelectorAll(".model-tab").forEach(button => {{
         button.classList.toggle("active", button.dataset.tab === tabName);
     }});
     document.getElementById("recommendSection").classList.toggle("active", tabName === "recommend");
     document.getElementById("listSection").classList.toggle("active", tabName === "list");
+    scheduleModelStateSave();
 }}
 
 function setSpecBlock(sheetName) {{
+    captureCurrentSpecState();
     currentSpecSheet = sheetName;
     document.querySelectorAll(".spec-block").forEach(button => {{
         button.classList.toggle("active", button.dataset.sheet === sheetName);
@@ -499,8 +510,14 @@ function setSpecBlock(sheetName) {{
     document.querySelectorAll(".criteria-field").forEach(field => {{
         field.classList.toggle("active", activeGroups.some(group => field.classList.contains(group)));
     }});
-    currentSpecsResult = null;
-    renderSpecInputSheet();
+    const sheetState = specStateBySheet[sheetName] || {{}};
+    currentSpecsResult = sheetState.result || null;
+    savedSpecRequirement = sheetState.requirement || null;
+    savedSpecQuantity = Number(sheetState.quantity || 1);
+    renderSpecInputSheet(currentSpecsResult);
+    document.getElementById("summaryBlock").innerHTML = "";
+    document.getElementById("quoteBlock").innerHTML = currentSpecsResult ? renderSpecsQuoteTable(currentSpecsResult) : "";
+    scheduleModelStateSave();
 
 }}
 
@@ -538,7 +555,7 @@ function fieldInputHtml(key, value = "") {{
     const safeValue = esc(value || "");
     if (["stacking", "poe"].includes(key)) {{
         return `
-            <select class="sheet-select" id="req_${{key}}">
+            <select class="sheet-select" id="req_${{key}}" onchange="scheduleModelStateSave()">
                 <option value=""></option>
                 <option value="Y" ${{safeValue === "Y" ? "selected" : ""}}>Y</option>
                 <option value="N" ${{safeValue === "N" ? "selected" : ""}}>N</option>
@@ -547,7 +564,7 @@ function fieldInputHtml(key, value = "") {{
     }}
     if (key === "ap_type") {{
         return `
-            <select class="sheet-select" id="req_${{key}}">
+            <select class="sheet-select" id="req_${{key}}" onchange="scheduleModelStateSave()">
                 <option value=""></option>
                 <option value="indoor" ${{safeValue === "indoor" ? "selected" : ""}}>indoor</option>
                 <option value="outdoor" ${{safeValue === "outdoor" ? "selected" : ""}}>outdoor</option>
@@ -556,7 +573,7 @@ function fieldInputHtml(key, value = "") {{
     }}
     if (key === "wifi_technology") {{
         return `
-            <select class="sheet-select" id="req_${{key}}">
+            <select class="sheet-select" id="req_${{key}}" onchange="scheduleModelStateSave()">
                 <option value=""></option>
                 <option value="WiFi6" ${{safeValue === "WiFi6" ? "selected" : ""}}>WiFi6</option>
                 <option value="WiFi6E" ${{safeValue === "WiFi6E" ? "selected" : ""}}>WiFi6E</option>
@@ -566,14 +583,14 @@ function fieldInputHtml(key, value = "") {{
     }}
     if (key === "antenna_type") {{
         return `
-            <select class="sheet-select" id="req_${{key}}">
+            <select class="sheet-select" id="req_${{key}}" onchange="scheduleModelStateSave()">
                 <option value=""></option>
                 <option value="Omni" ${{safeValue === "Omni" ? "selected" : ""}}>Omni</option>
                 <option value="Directional" ${{safeValue === "Directional" ? "selected" : ""}}>Directional</option>
             </select>
         `;
     }}
-    return `<input class="sheet-input" id="req_${{key}}" value="${{safeValue}}" />`;
+    return `<input class="sheet-input" id="req_${{key}}" value="${{safeValue}}" oninput="scheduleModelStateSave()" />`;
 }}
 
 function collectSheetRequirement() {{
@@ -593,6 +610,16 @@ function currentDeviceQuantity() {{
     const el = document.getElementById("req_quantity");
     const value = el ? Number(el.value || 1) : 1;
     return Number.isFinite(value) && value > 0 ? value : 1;
+}}
+
+function captureCurrentSpecState() {{
+    if (!currentSpecSheet) return;
+    const hasRenderedSheet = !!document.getElementById("req_quantity");
+    specStateBySheet[currentSpecSheet] = {{
+        requirement: hasRenderedSheet ? collectSheetRequirement() : (savedSpecRequirement || {{ device_spec_sheet: currentSpecSheet }}),
+        quantity: hasRenderedSheet ? currentDeviceQuantity() : (savedSpecQuantity || 1),
+        result: currentSpecsResult || null
+    }};
 }}
 
 function manualRowsText() {{
@@ -629,6 +656,7 @@ function updateManualRow(index, key, value) {{
     if (key === "model") manualRows[index].price = 0;
     updateManualTotal();
     scheduleManualPriceRefresh();
+    scheduleModelStateSave();
 }}
 
 function updateManualTotal() {{
@@ -644,6 +672,7 @@ function manualCellKeydown(event, index, key) {{
         manualRows.push({{ model: "", quantity: "", price: 0 }});
     }}
     renderManualSheet();
+    scheduleModelStateSave();
     requestAnimationFrame(() => {{
         const next = document.getElementById(key === "quantity" ? `manual_qty_${{nextIndex}}` : `manual_model_${{nextIndex}}`);
         if (next) next.focus();
@@ -674,6 +703,7 @@ function pasteManualRows(event, startIndex) {{
     }});
     renderManualSheet();
     scheduleManualPriceRefresh();
+    scheduleModelStateSave();
 }}
 
 function scheduleManualPriceRefresh() {{
@@ -711,6 +741,7 @@ async function refreshManualPrices() {{
             if (key && priceByModel.has(key)) row.price = priceByModel.get(key);
         }});
         renderManualSheet();
+        saveModelState();
     }} catch (e) {{}}
 }}
 
@@ -720,6 +751,7 @@ function clearManualSheet() {{
     document.getElementById("summaryBlock").innerHTML = "";
     document.getElementById("quoteBlock").innerHTML = `<div class="empty-state">Chưa có bảng báo giá.</div>`;
     renderManualSheet();
+    saveModelState();
 }}
 
 function manualRequirementPayload() {{
@@ -785,8 +817,8 @@ function renderSpecInputSheet(data = null) {{
     const devices = data ? (data.devices || []) : [];
     const best = data ? (data.best || devices[0] || null) : null;
     const fields = SPEC_SHEET_FIELDS[currentSpecSheet] || [];
-    const requirement = data ? (data.requirement || {{}}) : collectSheetRequirement();
-    const quantity = data ? Number(data.quantity || 1) : currentDeviceQuantity();
+    const requirement = data ? (data.requirement || {{}}) : (savedSpecRequirement || collectSheetRequirement());
+    const quantity = data ? Number(data.quantity || 1) : (savedSpecQuantity || currentDeviceQuantity());
 
     document.getElementById("specInputBlock").innerHTML = `
         <div class="quote-table-wrap spec-sheet-wrap">
@@ -807,7 +839,7 @@ function renderSpecInputSheet(data = null) {{
                     <tr>
                         <th class="section-head left-block param-cell">Thông số</th>
                         <th class="yellow-cell left-block">Yêu cầu</th>
-                        <th class="yellow-cell left-block"><input class="sheet-input" id="req_quantity" value="${{esc(quantity || 1)}}" /></th>
+                        <th class="yellow-cell left-block"><input class="sheet-input" id="req_quantity" value="${{esc(quantity || 1)}}" oninput="scheduleModelStateSave()" /></th>
                         <th class="section-head best-col">${{esc((best || {{}}).model || "")}}</th>
                         <th class="freeze-gap"></th>
                         <th class="blank-gap"></th>
@@ -872,8 +904,8 @@ function renderSpecInputSheet(data = null) {{
     const devices = data ? (data.devices || []) : [];
     const best = data ? (data.best || devices[0] || null) : null;
     const fields = SPEC_SHEET_FIELDS[currentSpecSheet] || [];
-    const requirement = data ? (data.requirement || {{}}) : collectSheetRequirement();
-    const quantity = data ? Number(data.quantity || 1) : currentDeviceQuantity();
+    const requirement = data ? (data.requirement || {{}}) : (savedSpecRequirement || collectSheetRequirement());
+    const quantity = data ? Number(data.quantity || 1) : (savedSpecQuantity || currentDeviceQuantity());
 
     document.getElementById("specInputBlock").innerHTML = `
         <div class="quote-table-wrap spec-sheet-wrap">
@@ -893,7 +925,7 @@ function renderSpecInputSheet(data = null) {{
                     <tr>
                         <th class="section-head left-block param-cell">ThÃ´ng sá»‘</th>
                         <th class="yellow-cell left-block">YÃªu cáº§u</th>
-                        <th class="yellow-cell left-block"><input class="sheet-input" id="req_quantity" value="${{esc(quantity || 1)}}" /></th>
+                        <th class="yellow-cell left-block"><input class="sheet-input" id="req_quantity" value="${{esc(quantity || 1)}}" oninput="scheduleModelStateSave()" /></th>
                         <th class="section-head best-col">${{esc((best || {{}}).model || "")}}</th>
                     </tr>
                 </thead>
@@ -1015,8 +1047,8 @@ function renderSpecInputSheet(data = null) {{
     const devices = data ? (data.devices || []) : [];
     const best = data ? (data.best || devices[0] || null) : null;
     const fields = SPEC_SHEET_FIELDS[currentSpecSheet] || [];
-    const requirement = data ? (data.requirement || {{}}) : collectSheetRequirement();
-    const quantity = data ? Number(data.quantity || 1) : currentDeviceQuantity();
+    const requirement = data ? (data.requirement || {{}}) : (savedSpecRequirement || collectSheetRequirement());
+    const quantity = data ? Number(data.quantity || 1) : (savedSpecQuantity || currentDeviceQuantity());
 
     document.getElementById("specInputBlock").innerHTML = `
         <div class="quote-table-wrap spec-sheet-wrap">
@@ -1036,7 +1068,7 @@ function renderSpecInputSheet(data = null) {{
                     <tr>
                         <th class="section-head left-block param-cell">Thông số</th>
                         <th class="yellow-cell left-block">Yêu cầu</th>
-                        <th class="yellow-cell left-block"><input class="sheet-input" id="req_quantity" value="${{esc(quantity || 1)}}" /></th>
+                        <th class="yellow-cell left-block"><input class="sheet-input" id="req_quantity" value="${{esc(quantity || 1)}}" oninput="scheduleModelStateSave()" /></th>
                         <th class="section-head best-col">${{esc((best || {{}}).model || "")}}</th>
                     </tr>
                 </thead>
@@ -1120,6 +1152,13 @@ function requestValue(requirement, key) {{
 
 function renderSpecsResult(data) {{
     currentSpecsResult = data;
+    savedSpecRequirement = data.requirement || collectSheetRequirement();
+    savedSpecQuantity = Number(data.quantity || currentDeviceQuantity());
+    specStateBySheet[currentSpecSheet] = {{
+        requirement: savedSpecRequirement,
+        quantity: savedSpecQuantity,
+        result: currentSpecsResult
+    }};
     currentQuote = null;
     localStorage.removeItem("modelQuoteData");
     document.getElementById("summaryBlock").innerHTML = "";
@@ -1292,7 +1331,7 @@ function changeModel(lineIndex, opt, choiceIndex) {{
 async function recommendManualDevice() {{
     const message = document.getElementById("manualRecommendMessage");
     message.style.display = "block";
-    message.textContent = "Đang đề xuất thiết bị...";
+    message.textContent = "Đang tìm thiết bị...";
 
     const payload = manualRequirementPayload();
     const res = await fetch("/api/recommend-device-specs", {{
@@ -1308,7 +1347,7 @@ async function recommendManualDevice() {{
     if (!res.ok) {{
         message.className = "error-box";
         message.style.display = "block";
-        message.textContent = "Không đề xuất được thiết bị.";
+        message.textContent = "Không tìm được thiết bị đáp ứng.";
         return;
     }}
 
@@ -1317,6 +1356,7 @@ async function recommendManualDevice() {{
     message.style.display = "block";
     message.textContent = "Đã tìm thiết bị đáp ứng theo Device Specs.";
     renderSpecsResult(data);
+    saveModelState();
 }}
 
 async function buildQuoteFromDeviceList(openBom) {{
@@ -1351,6 +1391,7 @@ async function buildQuoteFromDeviceList(openBom) {{
     message.textContent = data.warnings && data.warnings.length ? data.warnings.join("\\n") : "Đã tổng hợp báo giá.";
     renderQuote();
     renderManualSheet();
+    saveModelState();
 
     if (openBom) {{
         localStorage.setItem("modelBomQuoteData", JSON.stringify(currentQuote));
@@ -1387,7 +1428,69 @@ function saveCurrentQuote() {{
     renderQuote();
 }}
 
+function scheduleModelStateSave() {{
+    if (restoringModelState) return;
+    clearTimeout(stateSaveTimer);
+    stateSaveTimer = setTimeout(saveModelState, 120);
+}}
+
+function saveModelState() {{
+    if (restoringModelState) return;
+    captureCurrentSpecState();
+    savedSpecRequirement = collectSheetRequirement();
+    savedSpecQuantity = currentDeviceQuantity();
+    const state = {{
+        active_tab: activeModelTab,
+        spec_sheet: currentSpecSheet,
+        spec_states: specStateBySheet,
+        manual_rows: manualRows,
+        current_quote: currentQuote
+    }};
+    localStorage.setItem(MODEL_STATE_KEY, JSON.stringify(state));
+}}
+
+function readModelState() {{
+    try {{
+        return JSON.parse(localStorage.getItem(MODEL_STATE_KEY) || "null") || null;
+    }} catch (e) {{
+        return null;
+    }}
+}}
+
+function restoreModelState() {{
+    const state = readModelState();
+    if (!state) return false;
+    restoringModelState = true;
+    activeModelTab = state.active_tab || "recommend";
+    currentSpecSheet = state.spec_sheet || "SwitchCampus";
+    specStateBySheet = state.spec_states || {{}};
+    if (!state.spec_states) {{
+        specStateBySheet[currentSpecSheet] = {{
+            requirement: state.spec_requirement || null,
+            quantity: Number(state.spec_quantity || 1),
+            result: state.specs_result || null
+        }};
+    }}
+    const sheetState = specStateBySheet[currentSpecSheet] || {{}};
+    savedSpecRequirement = sheetState.requirement || null;
+    savedSpecQuantity = Number(sheetState.quantity || 1);
+    currentSpecsResult = sheetState.result || null;
+    currentQuote = state.current_quote || null;
+    if (Array.isArray(state.manual_rows) && state.manual_rows.length) {{
+        manualRows = state.manual_rows;
+    }}
+    setSpecBlock(currentSpecSheet);
+    renderManualSheet();
+    setModelTab(activeModelTab);
+    restoringModelState = false;
+    return true;
+}}
+
 window.addEventListener("load", () => {{
+    if (restoreModelState()) {{
+        return;
+    }}
+
     setSpecBlock(currentSpecSheet);
     renderManualSheet();
     const saved = localStorage.getItem("modelQuoteData");
@@ -1402,6 +1505,7 @@ window.addEventListener("load", () => {{
     }} else {{
         renderQuote();
     }}
+    saveModelState();
 }});
 </script>
 </body>
