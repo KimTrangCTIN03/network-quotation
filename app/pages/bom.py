@@ -6,12 +6,15 @@ def render_bom_page(
     *,
     storage_key: str = "quoteData",
     nav_active: str = "bom",
+    solution_area: str = "campus",
+    group_filter: str = "",
     title: str = "Xuất BOM",
     empty_message: str = "Chua co du lieu bao gia de xuat BOM.",
     single_option: bool = False,
     download_prefix: str = "network_bom",
 ):
     single_option_js = "true" if single_option else "false"
+    active_option = "dc_sdn" if str(group_filter or "").strip().lower() == "dc-sdn" else "opt1"
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -238,7 +241,7 @@ def render_bom_page(
     </style>
 </head>
 <body>
-{render_nav(nav_active, user)}
+{render_nav(nav_active, user, solution_area)}
 <div class="container">
     <h1>{title}</h1>
     <div id="bom_block"></div>
@@ -246,13 +249,15 @@ def render_bom_page(
 
 <script>
 let currentBom = null;
-let activeOption = "opt1";
+let activeOption = "{active_option}";
 let bomLoadedFromCache = false;
-const BOM_CACHE_VERSION = "v3";
+const BOM_CACHE_VERSION = "v5";
 const BOM_STORAGE_KEY = "{storage_key}";
 const BOM_EMPTY_MESSAGE = "{empty_message}";
 const BOM_SINGLE_OPTION = {single_option_js};
 const BOM_DOWNLOAD_PREFIX = "{download_prefix}";
+const BOM_GROUP_FILTER = "{group_filter}";
+const BOM_DEFAULT_OPTION = BOM_GROUP_FILTER === "dc-sdn" ? "dc_sdn" : "opt1";
 
 function money(v) {{
     return "$" + Number(v || 0).toLocaleString(undefined, {{
@@ -279,7 +284,9 @@ function quoteHash(raw) {{
 }}
 
 function bomCacheKey(raw) {{
-    return `bomData:${{BOM_CACHE_VERSION}}:${{quoteHash(raw || "")}}`;
+    const scope = BOM_GROUP_FILTER || "all";
+    const mode = BOM_SINGLE_OPTION ? "single" : "multi";
+    return `bomData:${{BOM_CACHE_VERSION}}:${{scope}}:${{mode}}:${{quoteHash(raw || "")}}`;
 }}
 
 function clearOldBomCaches(activeKey) {{
@@ -354,7 +361,7 @@ async function loadBom(forceRefresh = false) {{
         const res = await fetch("/api/build-bom", {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ quote_data: JSON.parse(raw) }})
+            body: JSON.stringify({{ quote_data: JSON.parse(raw), group_filter: BOM_GROUP_FILTER }})
         }});
 
         if (!res.ok) {{
@@ -385,7 +392,8 @@ function setOption(optionKey) {{
 
 function renderSummary() {{
     const summary = currentBom.summary || {{}};
-    const optionKeys = BOM_SINGLE_OPTION ? [activeOption].filter(opt => summary[opt]) : Object.keys(summary);
+    const selectedSummaryKey = BOM_SINGLE_OPTION ? activeOption : activeOption;
+    const optionKeys = BOM_SINGLE_OPTION ? [selectedSummaryKey].filter(opt => summary[opt]) : Object.keys(summary);
 
     return `
         <div class="bom-summary">
@@ -478,10 +486,15 @@ function renderRows(rows) {{
 function renderBom() {{
     const options = currentBom.options || {{}};
     const optionKeys = Object.keys(options);
-    if (!options[activeOption] && optionKeys.length) {{
+    if (BOM_SINGLE_OPTION && BOM_DEFAULT_OPTION === "dc_sdn") {{
+        activeOption = BOM_DEFAULT_OPTION;
+    }} else if (BOM_SINGLE_OPTION && options[BOM_DEFAULT_OPTION]) {{
+        activeOption = BOM_DEFAULT_OPTION;
+    }}
+    if (!BOM_SINGLE_OPTION && !options[activeOption] && optionKeys.length) {{
         activeOption = optionKeys[0];
     }}
-    const option = options[activeOption] || {{ rows: [], total: 0, label: activeOption }};
+    const option = options[activeOption] || {{ rows: [], total: 0, label: activeOption === "dc_sdn" ? "DC-SDN BOM" : activeOption }};
     const visibleOptionKeys = BOM_SINGLE_OPTION ? [activeOption].filter(opt => options[opt]) : optionKeys;
 
     document.getElementById("bom_block").innerHTML = `
@@ -537,7 +550,7 @@ async function downloadBom() {{
         const res = await fetch("/api/download-bom", {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ quote_data: JSON.parse(raw), option_key: optionKey }})
+            body: JSON.stringify({{ quote_data: JSON.parse(raw), option_key: optionKey, group_filter: BOM_GROUP_FILTER }})
         }});
 
         if (!res.ok) {{

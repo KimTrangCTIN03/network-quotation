@@ -20,6 +20,7 @@ SOURCE_BOM_SHEETS = [
     "C8000",
     "C9200",
     "C9300",
+    "C9300X",
     "C1300",
     "EstimateDetails_CT167013261VV",
     "C9500",
@@ -35,6 +36,7 @@ SOURCE_BOM_FILES = [
     "C8000.xlsx",
     "C9200.xlsx",
     "C9300.xlsx",
+    "C9300X.xlsx",
     "C1300.xlsx",
     "C1200.xlsx",
     "C9500.xlsx",
@@ -402,9 +404,9 @@ def clear_catalog_cache() -> None:
 
 @lru_cache(maxsize=1)
 def read_price_map() -> Dict[str, float]:
-    from app.pricing.catalog import read_final_price_map
+    from app.pricing.catalog import read_list_price_map
 
-    return read_final_price_map()
+    return read_list_price_map()
 
 
 def read_cisco_tab_price_map() -> Dict[str, float]:
@@ -698,6 +700,10 @@ def read_specs_matrix_sheet(sheet_name: str) -> List[Dict[str, Any]]:
             if device_class:
                 specs["Access Point Class"] = device_class
 
+        if sheet_name == "SwitchCampus":
+            apply_c9300x_device_specs(model, specs)
+            device_class = find_class_in_specs(specs) or device_class
+
         devices.append({
             "model": model,
             "sheet": sheet_name,
@@ -713,19 +719,104 @@ SWITCH_SPEC_KEYS = {
     "class": "Switch Class",
     "bandwidth": "Switching Bandwidth - Full Duplex (Gbps)",
     "forwarding": "Forwarding Capacity (Mpps)",
-    "1g_rj45": "Sá»‘ lÆ°á»£ng cá»•ng 1GE Ä‘á»“ng",
-    "1g_sfp": "Sá»‘ lÆ°á»£ng cá»•ng 1GE SFP",
-    "10g_rj45": "Sá»‘ lÆ°á»£ng cá»•ng 10GE Ä‘á»“ng",
-    "10g_sfp": "Sá»‘ lÆ°á»£ng cá»•ng 10GE quang",
-    "100g": "Sá»‘ lÆ°á»£ng cá»•ng 100GE",
+    "1g_rj45": "Số lượng cổng 1GE đồng",
+    "1g_sfp": "Số lượng cổng 1GE SFP",
+    "10g_rj45": "Số lượng cổng 10GE đồng",
+    "10g_sfp": "Số lượng cổng 10GE quang",
+    "100g": "Số lượng cổng 100GE",
     "stacking": "Stacking (Y/N)",
     "poe": "PoE (Y/N)",
 }
 
 
+C9300X_DEVICE_SPEC_OVERRIDES = {
+    "C9300X-48HX": {
+        "bandwidth": 1760,
+        "forwarding": 1309,
+        "1g_rj45": 56,
+        "1g_sfp": 0,
+        "10g_rj45": 56,
+        "10g_sfp": 0,
+        "100g": 0,
+        "poe": "Y",
+    },
+    "C9300X-48TX": {
+        "bandwidth": 1760,
+        "forwarding": 1309,
+        "1g_rj45": 56,
+        "1g_sfp": 0,
+        "10g_rj45": 56,
+        "10g_sfp": 0,
+        "100g": 0,
+        "poe": "N",
+    },
+    "C9300X-48HXN": {
+        "bandwidth": 960,
+        "forwarding": 714.24,
+        "1g_rj45": 56,
+        "1g_sfp": 0,
+        "10g_rj45": 16,
+        "10g_sfp": 0,
+        "100g": 0,
+        "poe": "Y",
+    },
+    "C9300X-24HX": {
+        "bandwidth": 800,
+        "forwarding": 654.72,
+        "1g_rj45": 32,
+        "1g_sfp": 0,
+        "10g_rj45": 32,
+        "10g_sfp": 0,
+        "100g": 0,
+        "poe": "Y",
+    },
+    "C9300X-12Y": {
+        "bandwidth": 1000,
+        "forwarding": 744.04,
+        "1g_rj45": 8,
+        "1g_sfp": 12,
+        "10g_rj45": 8,
+        "10g_sfp": 12,
+        "100g": 0,
+        "poe": "N",
+    },
+    "C9300X-24Y": {
+        "bandwidth": 2000,
+        "forwarding": 1488,
+        "1g_rj45": 8,
+        "1g_sfp": 24,
+        "10g_rj45": 8,
+        "10g_sfp": 24,
+        "100g": 0,
+        "poe": "N",
+    },
+}
+
+
+def apply_c9300x_device_specs(model: str, specs: Dict[str, Any]) -> None:
+    overrides = C9300X_DEVICE_SPEC_OVERRIDES.get(normalize_model(model))
+
+    if not overrides:
+        return
+
+    specs[SWITCH_SPEC_KEYS["class"]] = "High End"
+    specs[SWITCH_SPEC_KEYS["bandwidth"]] = overrides["bandwidth"]
+    specs[SWITCH_SPEC_KEYS["forwarding"]] = overrides["forwarding"]
+    specs[SWITCH_SPEC_KEYS["1g_rj45"]] = overrides["1g_rj45"]
+    specs[SWITCH_SPEC_KEYS["1g_sfp"]] = overrides["1g_sfp"]
+    specs[SWITCH_SPEC_KEYS["10g_rj45"]] = overrides["10g_rj45"]
+    specs[SWITCH_SPEC_KEYS["10g_sfp"]] = overrides["10g_sfp"]
+    specs[SWITCH_SPEC_KEYS["100g"]] = overrides["100g"]
+    specs[SWITCH_SPEC_KEYS["stacking"]] = "Y"
+    specs[SWITCH_SPEC_KEYS["poe"]] = overrides["poe"]
+    specs["selection_source"] = "device_specs_c9300x"
+
+
 def infer_switch_class_from_model(model: str) -> str:
     text = model.upper()
 
+    if text.startswith("C9300X"):
+        return "High End"
     if text.startswith(("C1200", "C1300", "C9200")):
         return "Low End"
     if text.startswith(("C9300", "C9400", "C9500", "N9K-C93")):
@@ -756,12 +847,10 @@ def infer_switch_ports_from_model(model: str) -> Dict[str, float]:
 
         if "D" in suffix or "C" in suffix:
             ports["100g"] = max(ports["100g"], count)
+        elif "T" in suffix or "P" in suffix or "U" in suffix or "H" in suffix:
+            ports["1g_rj45"] = max(ports["1g_rj45"], count)
         elif "Y" in suffix or "S" in suffix or "X" in suffix:
             ports["10g_sfp"] = max(ports["10g_sfp"], count)
-        elif "T" in suffix:
-            ports["1g_rj45"] = max(ports["1g_rj45"], count)
-        elif "P" in suffix or "U" in suffix:
-            ports["1g_rj45"] = max(ports["1g_rj45"], count)
 
     for count_text, speed_text in re.findall(r"-(\d+)([GX])", text):
         count = to_float(count_text, 0)

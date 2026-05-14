@@ -1,7 +1,8 @@
 from app.pages.styles import BASE_STYLE, render_nav
 
 
-def render_quote_page(user=None):
+def render_quote_page(user=None, solution_area: str = "campus"):
+    solution_base = "/dc-sdn" if str(solution_area or "").lower() == "dc-sdn" else "/campus"
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -333,6 +334,7 @@ def render_quote_page(user=None):
         }}
 
         .check-dc-button {{
+            display: block;
             border: 1px solid #fed7aa;
             background: #fff7ed;
             color: #9a3412;
@@ -342,6 +344,7 @@ def render_quote_page(user=None):
             cursor: pointer;
             width: 100%;
             text-align: center;
+            text-decoration: none;
         }}
 
         .check-dc-button:hover {{
@@ -426,8 +429,8 @@ def render_quote_page(user=None):
         }}
     </style>
 </head>
-<body>
-{render_nav("quote", user)}
+<body class="solution-{solution_area}">
+{render_nav("quote", user, solution_area)}
 <div class="container">
     <div class="page-header">
         <div class="page-header-left">
@@ -440,13 +443,14 @@ def render_quote_page(user=None):
     <div id="group_summary_block"></div>
 
     <div class="actions">
-        <a class="btn btn-primary" href="/bom">Xuất BOM</a>
-        <a class="btn btn-secondary" href="/calculation-results">Quay lại kết quả tính toán</a>
-        <a class="btn btn-secondary" href="/survey">Quay lại khảo sát</a>
+        <a class="btn btn-primary" href="{solution_base}/bom">Xuất BOM</a>
+        <a class="btn btn-secondary" href="{solution_base}/calculation-results">Quay lại kết quả tính toán</a>
+        <a class="btn btn-secondary" href="{solution_base}/survey">Quay lại khảo sát</a>
     </div>
 </div>
 
 <script>
+const SOLUTION_AREA = "{solution_area}";
 let currentQuote = null;
 
 function money(v) {{
@@ -462,7 +466,10 @@ function isDcSdnLine(line) {{
 
 function scrollToDcSdnQuote() {{
     const target = document.getElementById("dc_sdn_quote_block");
-    if (!target) return;
+    if (!target) {{
+        window.location.href = "/dc-sdn/quote";
+        return;
+    }}
     target.scrollIntoView({{ behavior: "smooth", block: "start" }});
 }}
 
@@ -583,9 +590,9 @@ function renderDeviceSelector(index, opt, line) {{
 
     if (selected && String(selected.model || "").trim().toLowerCase() === "check dc-sdn") {{
         return `
-            <button type="button" class="check-dc-button" onclick="scrollToDcSdnQuote()">
+            <a class="check-dc-button" href="/dc-sdn/quote">
                 Check DC-SDN
-            </button>
+            </a>
             <div class="device-meta">Bấm để chọn thiết bị DC-SDN riêng.</div>
         `;
     }}
@@ -716,6 +723,20 @@ function renderSummary(lines) {{
             totals[opt] = totals[opt] - groupTotals["DC-SDN"][opt] + dcSingleTotal;
             groupTotals["DC-SDN"][opt] = dcSingleTotal;
         }});
+    }}
+
+    if (SOLUTION_AREA === "dc-sdn") {{
+        document.getElementById("summary_block").innerHTML = `
+            <div class="group-summary-card">
+                <div class="summary-grid-quote">
+                    <div class="quote-metric dc-metric">
+                        <div class="label">Giải pháp DC-SDN</div>
+                        <div class="value">${{money(dcSingleTotal)}}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        return totals;
     }}
 
     const campusTotals = {{
@@ -861,6 +882,13 @@ function renderQuoteTable(lines) {{
     const systemEntries = entries.filter(entry => !isDcSdnLine(entry.line));
     const dcEntries = entries.filter(entry => isDcSdnLine(entry.line));
 
+    if (SOLUTION_AREA === "dc-sdn") {{
+        document.getElementById("quote_block").innerHTML = renderDcSdnQuoteTable(dcEntries) || `
+            <div class="card"><div class="empty-state">Không có line DC-SDN.</div></div>
+        `;
+        return;
+    }}
+
     systemEntries.forEach(entry => {{
         const line = entry.line;
         const index = entry.index;
@@ -924,7 +952,6 @@ function renderQuoteTable(lines) {{
                 </table>
             </div>
         </div>
-        ${{renderDcSdnQuoteTable(dcEntries)}}
     `;
 }}
 
@@ -953,7 +980,11 @@ function renderQuote(scrollState = null) {{
     lines.forEach(line => ensureLineDefaults(line));
     localStorage.setItem("quoteData", JSON.stringify(currentQuote));
 
-    renderSummary(lines);
+    const visibleLines = SOLUTION_AREA === "dc-sdn"
+        ? lines.filter(line => isDcSdnLine(line))
+        : lines.filter(line => !isDcSdnLine(line));
+
+    renderSummary(visibleLines);
     renderQuoteTable(lines);
     renderGroupSummary(lines);
     restoreQuoteScrollState(scrollState);

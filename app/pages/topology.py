@@ -281,7 +281,7 @@ __NAV__
         </div>
         <div class="topology-actions">
             <button class="btn btn-secondary" type="button" onclick="exportPng()">Xuất ảnh</button>
-            <a class="btn btn-primary" href="/quote" onclick="saveTopologyLayout(false, true)">Chọn model</a>
+            <a class="btn btn-primary" href="__QUOTE_URL__" onclick="saveTopologyLayout(false, true)">Chọn model</a>
         </div>
     </div>
 
@@ -326,6 +326,7 @@ __NAV__
 
 <script>
 const ICONS = __ICON_DATA__;
+const SOLUTION_AREA = "__SOLUTION_AREA__";
 const CANVAS_W = 2200;
 const CANVAS_H = 2200;
 const STORAGE_KEY = "topologyLayout:fixed-tier-v5";
@@ -1955,11 +1956,17 @@ function readTopologySource() {
             wanSites: normalizeWanDetails((((data || {}).requirements || {}).wan_details || []))
         };
         const quoteLines = (((data || {}).quote || {}).quote_lines || []);
-        const lines = requirementLines.length ? requirementLines : quoteLines;
+        let lines = requirementLines.length ? requirementLines : quoteLines;
+        if (SOLUTION_AREA === "dc-sdn") {
+            topologyMeta = { buildings: [], wanSites: [] };
+            lines = lines.filter(line => String(line.group || "").toLowerCase().includes("dc-sdn"));
+        } else {
+            lines = lines.filter(line => !String(line.group || "").toLowerCase().includes("dc-sdn"));
+        }
 
-        return lines.length ? lines : SAMPLE_LINES;
+        return lines.length ? lines : (SOLUTION_AREA === "dc-sdn" ? [] : SAMPLE_LINES);
     } catch (error) {
-        return SAMPLE_LINES;
+        return SOLUTION_AREA === "dc-sdn" ? [] : SAMPLE_LINES;
     }
 }
 
@@ -1969,6 +1976,14 @@ function initTopology() {
     applySavedLayout();
     renderRequirementRows(topologyLines);
     renderTopology();
+    if (SOLUTION_AREA === "dc-sdn") {
+        document.querySelectorAll(".topology-actions button").forEach(button => {
+            const text = String(button.textContent || "").toLowerCase();
+            if (text.includes("tòa") || text.includes("server") || text.includes("wan") || text.includes("toàn")) {
+                button.style.display = "none";
+            }
+        });
+    }
     requestAnimationFrame(() => focusZone("all"));
 }
 
@@ -2008,10 +2023,13 @@ initTopology();
 """
 
 
-def render_topology_page(user=None):
+def render_topology_page(user=None, solution_area: str = "campus"):
+    solution_base = "/dc-sdn" if str(solution_area or "").lower() == "dc-sdn" else "/campus"
     return (
         TOPOLOGY_PAGE
         .replace("__BASE_STYLE__", BASE_STYLE)
-        .replace("__NAV__", render_nav("topology", user))
+        .replace("__NAV__", render_nav("topology", user, solution_area))
+        .replace("__QUOTE_URL__", f"{solution_base}/quote")
+        .replace("__SOLUTION_AREA__", "dc-sdn" if str(solution_area or "").lower() == "dc-sdn" else "campus")
         .replace("__ICON_DATA__", icon_data_urls())
     )

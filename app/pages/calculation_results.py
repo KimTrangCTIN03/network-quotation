@@ -1,7 +1,8 @@
 from app.pages.styles import BASE_STYLE, render_nav
 
 
-def render_calculation_results_page(user=None):
+def render_calculation_results_page(user=None, solution_area: str = "campus"):
+    solution_base = "/dc-sdn" if str(solution_area or "").lower() == "dc-sdn" else "/campus"
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -195,23 +196,28 @@ def render_calculation_results_page(user=None):
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }}
         }}
+        body.solution-campus .area-dc,
+        body.solution-campus .calc-summary-grid .metric:last-child {{
+            display: none;
+        }}
     </style>
 </head>
-<body>
-{render_nav("calculation", user)}
+<body class="solution-{solution_area}">
+{render_nav("calculation", user, solution_area)}
 <div class="container">
     <h1>Kết quả tính toán</h1>
     <div class="subtitle"></div>
     <div id="content"></div>
 
     <div class="actions">
-        <a class="btn btn-secondary" href="/survey">Quay lại khảo sát</a>
-        <a class="btn btn-secondary" href="/topology">V&#7869; topo gi&#7843;i ph&#225;p</a>
-        <a class="btn btn-primary" href="/quote">Tiếp tục chọn model & xem báo giá</a>
+        <a class="btn btn-secondary" href="{solution_base}/survey">Quay lại khảo sát</a>
+        <a class="btn btn-secondary" href="{solution_base}/topology">V&#7869; topo gi&#7843;i ph&#225;p</a>
+        <a class="btn btn-primary" href="{solution_base}/quote">Tiếp tục chọn model & xem báo giá</a>
     </div>
 </div>
 
 <script>
+const SOLUTION_AREA = "{solution_area}";
 function esc(v) {{
     return String(v ?? "")
         .replace(/&/g, "&amp;")
@@ -434,6 +440,30 @@ function render() {{
     const wanLines = requirements.filter(line => areaLabel(line.group) === "WAN");
     const dcLines = requirements.filter(line => areaLabel(line.group) === "DC-SDN");
 
+    if (SOLUTION_AREA === "dc-sdn") {{
+        document.getElementById("content").innerHTML = `
+            <div class="calc-layout">
+                <div class="card calc-summary-card">
+                    <h2>Tổng quan DC-SDN</h2>
+                    <div class="calc-summary-grid">
+                        <div class="metric"><div class="metric-label">DC-SDN</div><div class="metric-value">${{dcSdn.enabled ? "Có" : "Không"}}</div></div>
+                        <div class="metric"><div class="metric-label">Số rack</div><div class="metric-value">${{dcSdn.racks || 0}}</div></div>
+                        <div class="metric"><div class="metric-label">Server / rack</div><div class="metric-value">${{dcSdn.servers_per_rack || 0}}</div></div>
+                    </div>
+                </div>
+                ${{renderDcSdnBlock(dcSdn, dcLines)}}
+                <div class="card">
+                    <h2>Danh sách requirement DC-SDN</h2>
+                    <div class="area-card area-dc" id="dc-requirements">
+                        <div class="area-head"><h3>DC-SDN</h3></div>
+                        <div class="area-body">${{renderRequirementTable(dcLines, "Không có line DC-SDN.")}}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        return;
+    }}
+
     let html = `
         <div class="calc-layout">
             <div class="card calc-summary-card">
@@ -484,7 +514,6 @@ function render() {{
                     
                 </div>
 
-                ${{renderDcSdnBlock(dcSdn, dcLines)}}
             </div>
 
             <div class="area-card area-campus" id="campus-detail">

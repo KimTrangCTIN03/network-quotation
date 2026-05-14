@@ -137,6 +137,20 @@ def delete_session(token: str) -> None:
         conn.commit()
 
 
+def prune_activity_logs(retention_days: int = 3) -> None:
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM activity_logs WHERE created_at < now() - (%s * interval '1 day')",
+                    (retention_days,),
+                )
+            conn.commit()
+    except Exception:
+        # Log retention cleanup must never block normal workflows.
+        return
+
+
 def log_activity(
     user: Dict[str, Any] | None,
     action: str,
@@ -149,6 +163,9 @@ def log_activity(
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM activity_logs WHERE created_at < now() - interval '3 days'"
+                )
                 cur.execute(
                     """
                     INSERT INTO activity_logs (user_id, username, action, entity_type, entity_id, detail)
@@ -169,20 +186,35 @@ def log_activity(
         return
 
 
-def list_activity_logs(limit: int = 80) -> List[Dict[str, Any]]:
+def list_activity_logs(user: Dict[str, Any] | None = None, limit: int = 80) -> List[Dict[str, Any]]:
     ensure_default_admin()
+    prune_activity_logs()
+    user_id = (user or {}).get("id")
 
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, username, action, entity_type, entity_id, detail, created_at
-                FROM activity_logs
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (limit,),
-            )
+            if user_id:
+                cur.execute(
+                    """
+                    SELECT id, username, action, entity_type, entity_id, detail, created_at
+                    FROM activity_logs
+                    WHERE user_id = %s
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (user_id, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, username, action, entity_type, entity_id, detail, created_at
+                    FROM activity_logs
+                    WHERE user_id IS NULL
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
             rows = cur.fetchall()
 
     return [

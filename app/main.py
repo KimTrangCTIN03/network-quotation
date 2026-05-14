@@ -111,10 +111,10 @@ def root():
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next_url: str = "/dashboard"):
+def login_page(request: Request, next_url: str = "/dashboard", message: str = ""):
     if get_current_user(request):
         return RedirectResponse(safe_next_url(next_url), status_code=303)
-    return render_login_page(next_url=safe_next_url(next_url))
+    return render_login_page(next_url=safe_next_url(next_url), message=message)
 
 
 @app.post("/login")
@@ -135,7 +135,7 @@ def login_action(
         samesite="lax",
         max_age=7 * 24 * 60 * 60,
     )
-    log_activity(user, "login", "auth", user["id"], "Dang nhap he thong")
+    log_activity(user, "login", "auth", user["id"], "Đăng nhập hệ thống")
     return response
 
 
@@ -162,19 +162,12 @@ def register_action(
     try:
         create_user(username, password, "user", True, full_name, email, department, phone)
         user = authenticate_user(username, password)
-        if not user:
-            return HTMLResponse(render_register_page(message="Da tao tai khoan. Hay dang nhap."), status_code=201)
-
-        response = RedirectResponse("/dashboard", status_code=303)
-        response.set_cookie(
-            SESSION_COOKIE,
-            create_session(user["id"]),
-            httponly=True,
-            samesite="lax",
-            max_age=7 * 24 * 60 * 60,
+        if user:
+            log_activity(user, "register", "user", user["id"], "Người dùng tự đăng ký tài khoản")
+        return RedirectResponse(
+            f"/login?{urlencode({'message': 'Đã tạo tài khoản. Hãy đăng nhập bằng tài khoản vừa tạo.'})}",
+            status_code=303,
         )
-        log_activity(user, "register", "user", user["id"], "Nguoi dung tu dang ky")
-        return response
     except Exception as exc:
         return HTMLResponse(render_register_page(error=f"{type(exc).__name__}: {exc}"), status_code=400)
 
@@ -183,7 +176,7 @@ def register_action(
 def logout(request: Request):
     user = get_current_user(request)
     delete_session(request.cookies.get(SESSION_COOKIE, ""))
-    log_activity(user, "logout", "auth", user.get("id") if user else "", "Dang xuat he thong")
+    log_activity(user, "logout", "auth", user.get("id") if user else "", "Đăng xuất hệ thống")
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
@@ -212,8 +205,8 @@ def account_update(
 
     try:
         update_profile(user["id"], full_name, email, department, phone, password)
-        log_activity(user, "update_profile", "user", user["id"], "Cap nhat thong tin ca nhan")
-        return RedirectResponse("/account?message=Da cap nhat thong tin", status_code=303)
+        log_activity(user, "update_profile", "user", user["id"], "Cập nhật thông tin cá nhân")
+        return RedirectResponse("/account?message=Đã cập nhật thông tin", status_code=303)
     except Exception as exc:
         return RedirectResponse(f"/account?{urlencode({'error': f'{type(exc).__name__}: {exc}'})}", status_code=303)
 
@@ -228,26 +221,65 @@ def dashboard_page(request: Request):
 
 @app.get("/survey", response_class=HTMLResponse)
 def survey_page(request: Request):
+    return campus_survey_page(request)
+
+
+@app.get("/campus/survey", response_class=HTMLResponse)
+def campus_survey_page(request: Request):
     user = page_user(request)
     if not user:
         return login_redirect(request)
-    return render_survey_page(user)
+    return render_survey_page(user, "campus")
+
+
+@app.get("/dc-sdn/survey", response_class=HTMLResponse)
+def dc_sdn_survey_page(request: Request):
+    user = page_user(request)
+    if not user:
+        return login_redirect(request)
+    return render_survey_page(user, "dc-sdn")
 
 
 @app.get("/calculation-results", response_class=HTMLResponse)
 def calculation_results_page(request: Request):
+    return campus_calculation_results_page(request)
+
+
+@app.get("/campus/calculation-results", response_class=HTMLResponse)
+def campus_calculation_results_page(request: Request):
     user = page_user(request)
     if not user:
         return login_redirect(request)
-    return render_calculation_results_page(user)
+    return render_calculation_results_page(user, "campus")
+
+
+@app.get("/dc-sdn/calculation-results", response_class=HTMLResponse)
+def dc_sdn_calculation_results_page(request: Request):
+    user = page_user(request)
+    if not user:
+        return login_redirect(request)
+    return render_calculation_results_page(user, "dc-sdn")
 
 
 @app.get("/quote", response_class=HTMLResponse)
 def quote_page(request: Request):
+    return campus_quote_page(request)
+
+
+@app.get("/campus/quote", response_class=HTMLResponse)
+def campus_quote_page(request: Request):
     user = page_user(request)
     if not user:
         return login_redirect(request)
-    return render_quote_page(user)
+    return render_quote_page(user, "campus")
+
+
+@app.get("/dc-sdn/quote", response_class=HTMLResponse)
+def dc_sdn_quote_page(request: Request):
+    user = page_user(request)
+    if not user:
+        return login_redirect(request)
+    return render_quote_page(user, "dc-sdn")
 
 
 @app.get("/model-quote", response_class=HTMLResponse)
@@ -260,18 +292,44 @@ def model_quote_page(request: Request):
 
 @app.get("/topology", response_class=HTMLResponse)
 def topology_page(request: Request):
+    return campus_topology_page(request)
+
+
+@app.get("/campus/topology", response_class=HTMLResponse)
+def campus_topology_page(request: Request):
     user = page_user(request)
     if not user:
         return login_redirect(request)
-    return render_topology_page(user)
+    return render_topology_page(user, "campus")
+
+
+@app.get("/dc-sdn/topology", response_class=HTMLResponse)
+def dc_sdn_topology_page(request: Request):
+    user = page_user(request)
+    if not user:
+        return login_redirect(request)
+    return render_topology_page(user, "dc-sdn")
 
 
 @app.get("/bom", response_class=HTMLResponse)
 def bom_page(request: Request):
+    return campus_bom_page(request)
+
+
+@app.get("/campus/bom", response_class=HTMLResponse)
+def campus_bom_page(request: Request):
     user = page_user(request)
     if not user:
         return login_redirect(request)
-    return render_bom_page(user)
+    return render_bom_page(user, solution_area="campus", group_filter="campus", title="BOM Campus")
+
+
+@app.get("/dc-sdn/bom", response_class=HTMLResponse)
+def dc_sdn_bom_page(request: Request):
+    user = page_user(request)
+    if not user:
+        return login_redirect(request)
+    return render_bom_page(user, solution_area="dc-sdn", group_filter="dc-sdn", title="BOM DC-SDN", single_option=True, download_prefix="dc_sdn_bom")
 
 
 @app.get("/model-bom", response_class=HTMLResponse)
@@ -284,7 +342,7 @@ def model_bom_page(request: Request):
         storage_key="modelBomQuoteData",
         nav_active="model_quote",
         title="Xuất BOM on-demand",
-        empty_message="Chua co list thiet bi de xuat BOM on-demand.",
+        empty_message="Chưa có danh sách thiết bị để xuất BOM on-demand.",
         single_option=True,
         download_prefix="model_bom",
     )
@@ -305,7 +363,7 @@ def admin_page(request: Request, message: str = "", error: str = ""):
         return login_redirect(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin permission required")
-    return render_admin_page(list_users(), user, admin_overview(), list_activity_logs(), list_quote_records(user), message, error)
+    return render_admin_page(list_users(), user, admin_overview(), list_activity_logs(user), list_quote_records(user), message, error)
 
 
 @app.post("/admin/users")
@@ -361,7 +419,7 @@ def api_generate_quote(payload: SurveyPayload, _user=Depends(require_api_user)):
     req = build_requirements(data)
     recs = recommend_all(req["proposal_lines"])
     quote = build_quote(recs)
-    log_activity(_user, "generate_quote", "quote", "", "Chay tinh toan bao gia")
+    log_activity(_user, "generate_quote", "quote", "", "Chạy tính toán báo giá")
 
     return {
         "requirements": req,
@@ -459,11 +517,11 @@ def admin_update_quote_status(
     admin = require_admin_user(request)
     quote = update_quote_status(admin, quote_id, status)
     log_activity(admin, "update_quote_status", "quote", quote_id, quote["status"])
-    return RedirectResponse("/admin?message=Da cap nhat trang thai bao gia", status_code=303)
+    return RedirectResponse("/admin?message=Đã cập nhật trạng thái báo giá", status_code=303)
 
 
 @app.post("/api/price-bom")
-async def api_price_bom(file: UploadFile = File(...), _user=Depends(require_admin_user)):
+async def api_price_bom(file: UploadFile = File(...), _user=Depends(require_api_user)):
     content = await file.read()
     return quote_bom(content, file.filename or "")
 
@@ -473,7 +531,7 @@ async def api_import_am_prices(
     file: UploadFile = File(...),
     vendor: str = Form("Cisco"),
     confirm_overwrite: bool = Form(False),
-    _user=Depends(require_admin_user),
+    _user=Depends(require_api_user),
 ):
     content = await file.read()
     result = import_prices_from_bom(content, file.filename or "", vendor, confirm_overwrite)
@@ -488,7 +546,7 @@ def api_prices(q: str = "", limit: int = 500, vendor: str = "", _user=Depends(re
 
 @app.post("/api/prices/am")
 def api_save_am_price(payload: AmPricePayload, _user=Depends(require_api_user)):
-    list_price = payload.list_price if _user.get("role") == "admin" else None
+    list_price = payload.list_price
     result = save_am_price(payload.model, payload.price, payload.vendor, list_price)
     log_activity(_user, "save_am_price", "price", payload.model, f"vendor={payload.vendor}")
     return result

@@ -8,7 +8,10 @@ from openpyxl.utils import get_column_letter
 
 from app.catalog_engine import BOM_DIR, cell_value, is_integer_line_number, normalize_model, to_float
 from app.catalog_engine import C8000_SECURE_LICENSE_PARTS, C8000_SECURE_VARIANTS
-from app.pricing.rules import INDOOR_AP_POWER_INJECTOR, OUTDOOR_AP_ACCESSORIES, WIFI7_LICENSE_BUNDLE
+from app.pricing.rules import (
+    OUTDOOR_AP_BRACKET,
+    WIFI7_LICENSE_BUNDLE,
+)
 
 
 OPTIONS = [
@@ -22,6 +25,7 @@ DETAIL_BOM_SHEETS = [
     "C8000",
     "C9200",
     "C9300",
+    "C9300X",
     "C1300",
     "EstimateDetails_CT167013261VV",
     "C9500",
@@ -37,6 +41,7 @@ DETAIL_BOM_FILES = [
     "C8000.xlsx",
     "C9200.xlsx",
     "C9300.xlsx",
+    "C9300X.xlsx",
     "C1300.xlsx",
     "C1200.xlsx",
     "C9500.xlsx",
@@ -376,8 +381,6 @@ def find_bundle_parts(
                     continue
 
                 parts = []
-                stop_row = ws.max_row + 1
-
                 for part_row in range(row, ws.max_row + 1):
                     if part_row != row:
                         next_line_number = cell_value(wb, ws, part_row, 1)
@@ -389,7 +392,6 @@ def find_bundle_parts(
                     subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
 
                     if subtotal_label == "subtotal":
-                        stop_row = part_row
                         break
 
                     part = row_to_bom_part(wb, ws, part_row, selected_model, quote_quantity, option_key, line)
@@ -397,31 +399,57 @@ def find_bundle_parts(
                     if part:
                         parts.append(part)
 
-                if ws.title == "ISR1000_input":
-                    marker_row = None
-                    model_key = normalize_model(selected_model).lower()
-
-                    for scan_row in range(stop_row + 1, min(ws.max_row, stop_row + 4) + 1):
-                        marker = str(cell_value(wb, ws, scan_row, 3) or "").lower()
-
-                        if "license" in marker and model_key in normalize_model(marker).lower():
-                            marker_row = scan_row
-                            break
-
-                    if marker_row:
-                        for part_row in range(marker_row + 1, ws.max_row + 1):
-                            subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
-
-                            if subtotal_label == "subtotal":
-                                break
-
-                            part = row_to_bom_part(wb, ws, part_row, selected_model, quote_quantity, option_key, line)
-
-                            if part:
-                                parts.append(part)
-
                 parts.extend(add_mapped_components(workbooks, selected_model, quote_quantity, option_key, line, ws.title))
                 return parts
+
+    return []
+
+
+def find_isr1000_license_block(
+    workbooks: List[Any],
+    selected_model: str,
+    quote_quantity: float,
+    option_key: str,
+    line: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    model_key = normalize_model(selected_model).lower()
+
+    if not model_key:
+        return []
+
+    for wb in workbooks:
+        if "ISR1000_input" not in wb.sheetnames:
+            continue
+
+        ws = wb["ISR1000_input"]
+        for row in range(2, ws.max_row + 1):
+            marker = str(cell_value(wb, ws, row, 3) or "").lower()
+
+            if "license" not in marker or model_key not in normalize_model(marker).lower():
+                continue
+
+            parts = []
+            for part_row in range(row + 1, ws.max_row + 1):
+                subtotal_label = str(cell_value(wb, ws, part_row, 13) or "").strip().lower()
+
+                if subtotal_label == "subtotal":
+                    break
+
+                part = row_to_bom_part(
+                    wb,
+                    ws,
+                    part_row,
+                    selected_model,
+                    quote_quantity,
+                    option_key,
+                    line,
+                    "License",
+                )
+
+                if part:
+                    parts.append(part)
+
+            return parts
 
     return []
 
@@ -436,16 +464,6 @@ def add_mapped_components(
 ) -> List[Dict[str, Any]]:
     model = selected_base_model(selected_model)
     extras: List[Dict[str, Any]] = []
-
-    if source_sheet == "AP_input":
-        if model.startswith("CW917"):
-            extras.extend(find_part_block(workbooks, INDOOR_AP_POWER_INJECTOR, selected_model, quote_quantity, option_key, line, "Accessory"))
-        elif model.startswith("C9124") or model == "CW9163E":
-            for part_number in OUTDOOR_AP_ACCESSORIES:
-                component_type = "Bracket/Mount" if "MNT" in part_number else "Accessory"
-                extras.extend(find_part_block(workbooks, part_number, selected_model, quote_quantity, option_key, line, component_type))
-        elif model.startswith("C9136") or model.startswith("CW916"):
-            extras.extend(find_part_block(workbooks, INDOOR_AP_POWER_INJECTOR, selected_model, quote_quantity, option_key, line, "Accessory"))
 
     variant = selected_variant(selected_model)
 
@@ -478,6 +496,30 @@ def add_separate_component_blocks(
             option_key,
             line,
             "License",
+        )
+        if license_block:
+            blocks.append(license_block)
+
+    if model.startswith("C9124") or model == "CW9163E":
+        bracket_block = find_part_block(
+            workbooks,
+            OUTDOOR_AP_BRACKET,
+            selected_model,
+            quote_quantity,
+            option_key,
+            line,
+            "Bracket/Mount",
+        )
+        if bracket_block:
+            blocks.append(bracket_block)
+
+    if model.startswith(("C11", "ISR1")):
+        license_block = find_isr1000_license_block(
+            workbooks,
+            selected_model,
+            quote_quantity,
+            option_key,
+            line,
         )
         if license_block:
             blocks.append(license_block)
@@ -869,7 +911,9 @@ def build_bom(quote_data: Dict[str, Any], group_filter: str | None = None) -> Di
     ]
     group_filter_text = str(group_filter or "").strip().lower()
 
-    if group_filter_text and group_filter_text != "dc-sdn":
+    if group_filter_text == "campus":
+        dc_sdn_lines = []
+    elif group_filter_text and group_filter_text != "dc-sdn":
         system_lines = [
             line
             for line in system_lines
@@ -879,14 +923,15 @@ def build_bom(quote_data: Dict[str, Any], group_filter: str | None = None) -> Di
     elif group_filter_text == "dc-sdn":
         system_lines = []
 
-    for option_key, option_label in OPTIONS:
-        option = build_bom_option(workbooks, system_lines, option_key, option_key, option_label)
-        result["options"][option_key] = option
-        result["summary"][option_key] = {
-            "label": option["label"],
-            "total": option["total"],
-            "line_count": option["line_count"],
-        }
+    if group_filter_text != "dc-sdn":
+        for option_key, option_label in OPTIONS:
+            option = build_bom_option(workbooks, system_lines, option_key, option_key, option_label)
+            result["options"][option_key] = option
+            result["summary"][option_key] = {
+                "label": option["label"],
+                "total": option["total"],
+                "line_count": option["line_count"],
+            }
 
     if dc_sdn_lines:
         dc_key, dc_label = DC_SDN_OPTION

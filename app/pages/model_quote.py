@@ -422,7 +422,8 @@ let savedSpecRequirement = null;
 let savedSpecQuantity = 1;
 let restoringModelState = false;
 let specStateBySheet = {{}};
-const MODEL_STATE_KEY = "modelQuoteState";
+const MODEL_QUOTE_PRICE_VERSION = "bom-price-v2";
+const MODEL_STATE_KEY = "modelQuoteState:bom-price-v2";
 
 const SPEC_SHEET_FIELDS = {{
     Router: [
@@ -762,6 +763,7 @@ function manualRequirementPayload() {{
 }}
 
 function normalizeQuote(quoteData) {{
+    if (quoteData) quoteData.price_version = MODEL_QUOTE_PRICE_VERSION;
     const lines = (((quoteData || {{}}).quote || {{}}).quote_lines || []);
     lines.forEach(line => {{
         if (!line.selected) line.selected = {{}};
@@ -1475,7 +1477,9 @@ function restoreModelState() {{
     savedSpecRequirement = sheetState.requirement || null;
     savedSpecQuantity = Number(sheetState.quantity || 1);
     currentSpecsResult = sheetState.result || null;
-    currentQuote = state.current_quote || null;
+    currentQuote = state.current_quote && state.current_quote.price_version === MODEL_QUOTE_PRICE_VERSION
+        ? state.current_quote
+        : null;
     if (Array.isArray(state.manual_rows) && state.manual_rows.length) {{
         manualRows = state.manual_rows;
     }}
@@ -1497,7 +1501,7 @@ window.addEventListener("load", () => {{
     if (saved) {{
         try {{
             const parsed = JSON.parse(saved);
-            if (((parsed.quote || {{}}).quote_lines || []).length) {{
+            if (parsed.price_version === MODEL_QUOTE_PRICE_VERSION && (((parsed.quote || {{}}).quote_lines || []).length)) {{
                 currentQuote = parsed;
                 renderQuote();
             }}

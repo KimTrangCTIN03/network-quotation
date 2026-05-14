@@ -1,7 +1,8 @@
 from app.pages.styles import BASE_STYLE, render_nav
 
 
-def render_survey_page(user=None):
+def render_survey_page(user=None, solution_area: str = "campus"):
+    solution_base = "/dc-sdn" if str(solution_area or "").lower() == "dc-sdn" else "/campus"
     return f"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -121,8 +122,8 @@ def render_survey_page(user=None):
         }}
     </style>
 </head>
-<body>
-{render_nav("survey", user)}
+<body class="solution-{solution_area}">
+{render_nav("survey", user, solution_area)}
 <div class="container">
     <h1>Network Quotation Tool</h1>
     <div class="subtitle"></div>
@@ -351,6 +352,7 @@ def render_survey_page(user=None):
 </div>
 
 <script>
+const SOLUTION_AREA = "{solution_area}";
 let surveyBuildings = [];
 let surveyWans = [];
 let buildingEditIndex = 0;
@@ -816,6 +818,42 @@ function loadSample() {{
     }});
 }}
 
+function setDisplayFor(element, visible) {{
+    if (element) element.style.display = visible ? "" : "none";
+}}
+
+function setSectionDisplay(titleText, visible) {{
+    const titles = Array.from(document.querySelectorAll(".section-title"));
+    const title = titles.find(el => String(el.textContent || "").toLowerCase().includes(titleText));
+    if (!title) return;
+    setDisplayFor(title, visible);
+    let next = title.nextElementSibling;
+    while (next && !next.classList.contains("section-title") && !next.classList.contains("actions")) {{
+        setDisplayFor(next, visible);
+        next = next.nextElementSibling;
+    }}
+}}
+
+function applySolutionAreaMode() {{
+    const isDc = SOLUTION_AREA === "dc-sdn";
+    setSectionDisplay("1.", !isDc);
+    setSectionDisplay("2.", !isDc);
+    setSectionDisplay("3.", !isDc);
+    setSectionDisplay("5.", !isDc);
+    setSectionDisplay("4.", isDc);
+    ["buildings_summary", "wan_summary", "server_farm_fields"].forEach(id => {{
+        const element = document.getElementById(id);
+        setDisplayFor(element, !isDc);
+        if (element && element.previousElementSibling && element.previousElementSibling.classList.contains("actions")) {{
+            setDisplayFor(element.previousElementSibling, !isDc);
+        }}
+    }});
+    ["building_modal", "wan_modal"].forEach(id => setDisplayFor(document.getElementById(id), !isDc));
+    const dcEnabled = document.getElementById("dc_sdn_enabled");
+    if (dcEnabled) dcEnabled.checked = isDc || dcEnabled.checked;
+    toggleDcSdn();
+}}
+
 async function generateCalculation() {{
     hideError();
 
@@ -850,13 +888,14 @@ async function generateCalculation() {{
         localStorage.setItem("surveyPayload", JSON.stringify(payload));
         localStorage.setItem("quoteData", JSON.stringify(data));
 
-        window.location.href = "/calculation-results";
+        window.location.href = "{solution_base}/calculation-results";
     }} catch (e) {{
         showError("Không gọi được API. Kiểm tra uvicorn còn chạy không.\\n" + e);
     }}
 }}
 
 restoreSurvey();
+applySolutionAreaMode();
 </script>
 </body>
 </html>

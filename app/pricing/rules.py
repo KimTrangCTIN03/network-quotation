@@ -7,7 +7,9 @@ from app.catalog_engine import BOM_DIR, cell_value, is_integer_line_number, norm
 
 
 INDOOR_AP_POWER_INJECTOR = "AIR-PWRINJ7"
-OUTDOOR_AP_ACCESSORIES = ["IW-PWRINJ-60RGDMG", "AIR-MNT-VERT1"]
+OUTDOOR_AP_POWER_INJECTOR = "IW-PWRINJ-60RGDMG"
+OUTDOOR_AP_BRACKET = "AIR-MNT-VERT1"
+OUTDOOR_AP_ACCESSORIES = [OUTDOOR_AP_POWER_INJECTOR, OUTDOOR_AP_BRACKET]
 WIFI7_LICENSE_BUNDLE = "CISCO-NETWORK-SUB"
 
 
@@ -118,16 +120,14 @@ def add_ap_accessory_and_license_prices(prices: Dict[str, float]) -> None:
         for model, price in subtotals.items()
     }
 
-    # AP mapping rule summary:
-    # - C9136 and CW916 indoor APs add AIR-PWRINJ7.
-    # - C9124 outdoor APs and CW9163E add outdoor injector + mount.
-    # - CW917 WiFi 7 APs add AIR-PWRINJ7 plus one share of the Cisco Network
-    #   subscription bundle. The bundle subtotal covers five AP license groups,
-    #   so wifi7_license_price_per_ap() divides it by 5.
+    # AP mapping rule summary from the input mapping table:
+    # - C9136 and CW916 indoor APs keep base price; injector is BOM-only.
+    # - CW917 WiFi 7 APs use base price plus one Cisco Wireless license.
+    # - C9124 outdoor APs and CW9163E use base price plus bracket; outdoor
+    #   injector is BOM-only.
     # Accessory rows are kept in normalized_prices for calculations but skipped
     # from visible catalog output elsewhere.
-    indoor_injector = normalized_prices.get(INDOOR_AP_POWER_INJECTOR, 0)
-    outdoor_accessory_total = sum(normalized_prices.get(model, 0) for model in OUTDOOR_AP_ACCESSORIES)
+    outdoor_bracket = normalized_prices.get(OUTDOOR_AP_BRACKET, 0)
     wifi7_license_unit = wifi7_license_price_per_ap(subtotals)
 
     for model, base_price in normalized_prices.items():
@@ -135,11 +135,11 @@ def add_ap_accessory_and_license_prices(prices: Dict[str, float]) -> None:
             continue
 
         if model.startswith("CW917"):
-            prices[model] = base_price + indoor_injector + wifi7_license_unit
+            prices[model] = base_price + wifi7_license_unit
         elif model.startswith("C9124") or model == "CW9163E":
-            prices[model] = base_price + outdoor_accessory_total
+            prices[model] = base_price + outdoor_bracket
         elif model.startswith("C9136") or model.startswith("CW916"):
-            prices[model] = base_price + indoor_injector
+            prices[model] = base_price
 
 
 def wifi7_license_price_per_ap(subtotals: Dict[str, float]) -> float:

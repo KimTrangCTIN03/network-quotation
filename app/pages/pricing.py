@@ -2,7 +2,7 @@ from app.pages.styles import BASE_STYLE, render_nav
 
 
 def render_pricing_page(user=None):
-    is_admin = bool(user and user.get("role") == "admin")
+    is_admin = bool(user)
     list_price_disabled = "" if is_admin else "disabled"
     admin_tools_style = "" if is_admin else "display:none;"
     user_note_style = "display:none;" if is_admin else ""

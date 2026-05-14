@@ -11,8 +11,9 @@ def esc_html(value) -> str:
     )
 
 
-def render_login_page(error: str = "", next_url: str = "/dashboard") -> str:
+def render_login_page(error: str = "", next_url: str = "/dashboard", message: str = "") -> str:
     error_html = f'<div class="error-box" style="display:block;">{esc_html(error)}</div>' if error else ""
+    message_html = f'<div class="success-box" style="display:block;">{esc_html(message)}</div>' if message else ""
 
     return f"""
 <!DOCTYPE html>
@@ -68,12 +69,13 @@ def render_login_page(error: str = "", next_url: str = "/dashboard") -> str:
         <div style="height:12px;"></div>
         <label>Mật khẩu</label>
         <input type="password" name="password" autocomplete="current-password" required />
+        {message_html}
         {error_html}
         <div class="login-actions">
             <button class="btn btn-primary" type="submit">Đăng nhập</button>
         </div>
         <div style="margin-top:14px; text-align:center;">
-            <a href="/register">Chua co tai khoan? Dang ky</a>
+            <a href="/register">Chưa có tài khoản? Đăng ký</a>
         </div>
     </form>
 </div>
@@ -91,7 +93,7 @@ def render_register_page(error: str = "", message: str = "") -> str:
 <html lang="vi">
 <head>
     <meta charset="utf-8" />
-    <title>Dang ky</title>
+    <title>Đăng ký</title>
     {BASE_STYLE}
     <style>
         .auth-shell {{
@@ -136,7 +138,6 @@ def render_register_page(error: str = "", message: str = "") -> str:
 <div class="auth-shell">
     <form class="auth-card" method="post" action="/register">
         <h1>Đăng ký tài khoản</h1>
-        <div class="subtitle">Tài khoản mới sẽ có quyền user. Admin có thể đổi quyền trong trang quản trị.</div>
         {message_html}
         {error_html}
         <div class="form-grid">

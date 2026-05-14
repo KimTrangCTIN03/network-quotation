@@ -46,17 +46,112 @@ BASE_STYLE = """
         display: flex;
         gap: 8px;
         align-items: center;
-        overflow-x: auto;
+        overflow: visible;
         padding-bottom: 2px;
+    }
+    .app-nav-item {
+        position: relative;
+    }
+    .app-nav-item::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 100%;
+        height: 10px;
+        display: none;
+    }
+    .app-nav-item:hover::after,
+    .app-nav-item:focus-within::after {
+        display: block;
+    }
+    .app-dropdown,
+    .app-flyout {
+        position: absolute;
+        min-width: 170px;
+        display: none;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px;
+        background: #fff;
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+        z-index: 30;
+    }
+    .app-dropdown {
+        top: 100%;
+        left: 0;
+        padding-top: 10px;
+    }
+    .app-flyout {
+        top: -8px;
+        left: 100%;
+        margin-left: 0;
+        padding-left: 14px;
+    }
+    .app-nav-item:hover > .app-dropdown,
+    .app-nav-item:focus-within > .app-dropdown,
+    .app-menu-item:hover > .app-flyout,
+    .app-menu-item:focus-within > .app-flyout {
+        display: flex;
+    }
+    .app-menu-item {
+        position: relative;
+    }
+    .app-menu-item.has-flyout::after {
+        content: "";
+        position: absolute;
+        top: -8px;
+        bottom: -8px;
+        left: 100%;
+        width: 14px;
+        display: none;
+    }
+    .app-menu-item.has-flyout:hover::after,
+    .app-menu-item.has-flyout:focus-within::after {
+        display: block;
+    }
+    .app-menu-link {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: #475569;
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 8px 10px;
+        border-radius: 8px;
+        white-space: nowrap;
+    }
+    .app-menu-item.has-flyout > .app-menu-link::after {
+        content: ">";
+        color: #94a3b8;
+        font-size: 12px;
+    }
+    .app-menu-link:hover,
+    .app-menu-link.active {
+        background: #dbeafe;
+        color: #1d4ed8;
     }
     .app-sub-nav {
         max-width: 1400px;
         margin: -4px auto 0;
-        padding: 0 24px 10px;
+        padding: 0 24px 8px;
         display: flex;
         justify-content: flex-end;
         gap: 6px;
         overflow-x: auto;
+    }
+    .app-sub-nav.solution-area-nav {
+        justify-content: flex-start;
+        border-top: 1px solid #e2e8f0;
+        padding-top: 8px;
+    }
+    .app-sub-nav.solution-step-nav {
+        justify-content: flex-start;
+        padding-bottom: 12px;
     }
     .app-sub-nav-link {
         color: #475569;
@@ -91,6 +186,28 @@ BASE_STYLE = """
     .app-nav-link.active {
         background: #2563eb;
         color: #fff;
+    }
+    .app-icon-link {
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .app-icon {
+        width: 20px;
+        height: 20px;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+    }
+    .app-profile-menu .app-dropdown {
+        left: auto;
+        right: 0;
+        min-width: 190px;
     }
     .container {
         max-width: 1400px;
@@ -328,6 +445,13 @@ BASE_STYLE = """
         }
         .app-nav-links {
             width: 100%;
+            overflow-x: auto;
+        }
+        .app-dropdown,
+        .app-flyout {
+            position: static;
+            box-shadow: none;
+            margin-top: 4px;
         }
         .app-sub-nav {
             justify-content: flex-start;
@@ -348,41 +472,68 @@ def esc_nav_label(value) -> str:
     )
 
 
-def render_nav(active: str = "", user: dict | None = None) -> str:
+def render_nav(active: str = "", user: dict | None = None, solution_area: str = "campus") -> str:
     solution_active = active in {"survey", "calculation", "topology", "quote", "bom"}
+    area = "dc-sdn" if str(solution_area or "").lower() == "dc-sdn" else "campus"
     items = [
         ("dashboard", "/dashboard", "Dashboard"),
-        ("solution", "/survey", "Gi&#7843;i ph&#225;p"),
         ("model_quote", "/model-quote", "Ch&#7885;n model"),
         ("pricing", "/pricing", "Catalog gi&#225;"),
     ]
-    if user and user.get("role") == "admin":
-        items.append(("admin", "/admin", "Admin"))
-    if user:
-        items.append(("account", "/account", esc_nav_label(user.get("full_name") or user.get("username") or "Tài khoản")))
-        items.append(("logout", "/logout", "Đăng xuất"))
     links = "".join(
         f'<a class="app-nav-link{" active" if key == active or (key == "solution" and solution_active) else ""}" href="{href}">{label}</a>'
         for key, href, label in items
     )
-    solution_items = [
-        ("survey", "/survey", "Kh&#7843;o s&#225;t"),
-        ("calculation", "/calculation-results", "K&#7871;t qu&#7843; Campus / DC-SDN"),
-        ("topology", "/topology", "Topo Campus"),
-        ("quote", "/quote", "Model Campus / DC-SDN"),
-        ("bom", "/bom", "BOM Campus / DC-SDN"),
-    ]
-    solution_links = "".join(
-        f'<a class="app-sub-nav-link{" active" if key == active else ""}" href="{href}">{label}</a>'
-        for key, href, label in solution_items
-    )
-    sub_nav = f'<div class="app-sub-nav">{solution_links}</div>' if solution_active else ""
+    def step_links(base: str, step_area: str) -> str:
+        solution_items = [
+            ("survey", f"{base}/survey", "Kh&#7843;o s&#225;t"),
+            ("calculation", f"{base}/calculation-results", "K&#7871;t qu&#7843;"),
+            ("topology", f"{base}/topology", "Topo"),
+            ("quote", f"{base}/quote", "Model"),
+            ("bom", f"{base}/bom", "BOM"),
+        ]
+        return "".join(
+            f'<a class="app-menu-link{" active" if key == active and step_area == area else ""}" href="{href}">{label}</a>'
+            for key, href, label in solution_items
+        )
+
+    solution_menu = f"""
+            <div class="app-nav-item">
+                <a class="app-nav-link{" active" if solution_active else ""}" href="/{area}/survey">Gi&#7843;i ph&#225;p</a>
+                <div class="app-dropdown">
+                    <div class="app-menu-item has-flyout">
+                        <a class="app-menu-link{" active" if area == "campus" else ""}" href="/campus/survey">Campus</a>
+                        <div class="app-flyout">{step_links("/campus", "campus")}</div>
+                    </div>
+                    <div class="app-menu-item has-flyout">
+                        <a class="app-menu-link{" active" if area == "dc-sdn" else ""}" href="/dc-sdn/survey">DC-SDN</a>
+                        <div class="app-flyout">{step_links("/dc-sdn", "dc-sdn")}</div>
+                    </div>
+                </div>
+            </div>
+    """
+    first_link_end = links.find("</a>") + 4
+    links = links[:first_link_end] + solution_menu + links[first_link_end:]
+    admin_icon = '<svg class="app-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 0 1-4 0v-.06a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 0 1 0-4h.06A1.7 1.7 0 0 0 4.6 8a1.7 1.7 0 0 0-.34-1.87l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 8.96 3.6 1.7 1.7 0 0 0 10 2.04V2a2 2 0 0 1 4 0v.06a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 8c.14.37.43.66.8.8.22.09.46.13.72.13H21a2 2 0 0 1 0 4h-.06A1.7 1.7 0 0 0 19.4 15Z"></path></svg>'
+    profile_icon = '<svg class="app-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0"></path><circle cx="12" cy="7" r="4"></circle></svg>'
+    if user and user.get("role") == "admin":
+        links += f'<a class="app-nav-link app-icon-link{" active" if active == "admin" else ""}" href="/admin" title="Qu&#7843;n tr&#7883; h&#7879; th&#7889;ng" aria-label="Qu&#7843;n tr&#7883; h&#7879; th&#7889;ng">{admin_icon}</a>'
+    if user:
+        user_label = esc_nav_label(user.get("full_name") or user.get("username") or "Tai khoan")
+        links += f"""
+            <div class="app-nav-item app-profile-menu">
+                <a class="app-nav-link app-icon-link{" active" if active == "account" else ""}" href="/account" title="{user_label}" aria-label="{user_label}">{profile_icon}</a>
+                <div class="app-dropdown">
+                    <a class="app-menu-link" href="/account">Th&#244;ng tin t&#224;i kho&#7843;n</a>
+                    <a class="app-menu-link" href="/logout">&#272;&#259;ng xu&#7845;t</a>
+                </div>
+            </div>
+        """
     return f"""
 <nav class="app-nav">
     <div class="app-nav-inner">
         <a class="app-brand" href="/dashboard">Network Quotation</a>
         <div class="app-nav-links">{links}</div>
     </div>
-    {sub_nav}
 </nav>
 """
