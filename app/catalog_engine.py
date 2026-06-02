@@ -10,7 +10,7 @@ from openpyxl.utils import column_index_from_string
 
 DATA_DIR = Path("data")
 
-SPECS_FILE = DATA_DIR / "Devices Specs_240426.xlsx"
+SPECS_FILE = DATA_DIR / "Devices Specs.xlsx"
 PRICE_FILE = DATA_DIR / "Cisco Unit List Price_240426.xlsx"
 PRICE_OVERRIDE_FILE = DATA_DIR / "am_price_overrides.json"
 BOM_DIR = DATA_DIR / "BOM"

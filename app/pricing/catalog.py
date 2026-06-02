@@ -19,9 +19,7 @@ from app.pricing.storage import (
 DEFAULT_VENDOR = "Cisco"
 INTERNAL_COMPONENT_MODELS = {
     "AIR-MNT-VERT1",
-    "AIR-PWRINJ7",
     "CISCO-NETWORK-SUB",
-    "IW-PWRINJ-60RGDMG",
     "L-DNA-TIER-ADD",
 }
 
@@ -50,9 +48,10 @@ def read_vendor_list_price_entries() -> List[Dict[str, Any]]:
     entries = []
     composed_prices = build_composed_list_prices()
 
-    # Cisco rows are generated from BOM subtotals. Internal accessory/license
+    # Cisco rows are generated from BOM subtotals. Internal license/bracket
     # parts are filtered from the visible catalog but can still be used by rules
-    # to compose final prices for AP/ISR/C8000 Secure product lines.
+    # to compose final prices for AP/ISR/C8000 Secure product lines. Power
+    # injectors stay visible because users may quote them as standalone items.
     for model, price in read_list_price_map().items():
         if model in INTERNAL_COMPONENT_MODELS:
             continue
